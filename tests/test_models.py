@@ -6,6 +6,7 @@ import pytest
 from nnsimviz.configs import NetworkConfig
 from nnsimviz.models import (
     RandomWeightedNetwork,
+    ExcitatoryInhibitoryNetwork,
     MODEL_REGISTRY,
     get_model,
     build_weight_matrix,
@@ -73,6 +74,72 @@ def test_unknown_model_raises():
 def test_invalid_config_propagates():
     with pytest.raises(ValueError):
         build_weight_matrix(NetworkConfig(n_neurons=0))
+
+
+def test_registry_contains_excitatory_inhibitory_model():
+    assert "excitatory_inhibitory" in MODEL_REGISTRY
+    assert isinstance(
+        get_model("excitatory_inhibitory"),
+        ExcitatoryInhibitoryNetwork,
+    )
+
+
+def test_excitatory_inhibitory_model_has_source_based_signs():
+    n = 12
+    positive_ratio = 0.25
+
+    cfg = NetworkConfig(
+        n_neurons=n,
+        connection_probability=1.0,
+        positive_connection_ratio=positive_ratio,
+        model_type="excitatory_inhibitory",
+        random_seed=123,
+    )
+
+    W = build_weight_matrix(cfg)
+
+    source_signs = []
+
+    for source in range(n):
+        outgoing_weights = W[:, source]
+        outgoing_weights = np.delete(outgoing_weights, source)
+
+        assert np.all(outgoing_weights > 0) or np.all(outgoing_weights < 0)
+
+        if np.all(outgoing_weights > 0):
+            source_signs.append(1)
+        else:
+            source_signs.append(-1)
+
+    expected_excitatory = int(round(positive_ratio * n))
+
+    assert source_signs.count(1) == expected_excitatory
+    assert source_signs.count(-1) == n - expected_excitatory
+
+
+def test_excitatory_inhibitory_model_has_no_self_connections():
+    cfg = NetworkConfig(
+        n_neurons=20,
+        model_type="excitatory_inhibitory",
+        connection_probability=1.0,
+    )
+
+    W = build_weight_matrix(cfg)
+
+    assert np.allclose(np.diag(W), 0.0)
+
+
+def test_excitatory_inhibitory_model_is_reproducible_with_seed():
+    cfg = NetworkConfig(
+        n_neurons=20,
+        model_type="excitatory_inhibitory",
+        random_seed=999,
+    )
+
+    W1 = build_weight_matrix(cfg)
+    W2 = build_weight_matrix(cfg)
+
+    assert np.array_equal(W1, W2)
 
 
 if __name__ == "__main__":

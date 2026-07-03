@@ -24,6 +24,7 @@ from .configs import (
 from .models import (
     NetworkModel,
     RandomWeightedNetwork,
+    ExcitatoryInhibitoryNetwork,
     MODEL_REGISTRY,
     get_model,
     build_weight_matrix,
@@ -40,6 +41,7 @@ __all__ = [
     "ProjectConfig",
     "NetworkModel",
     "RandomWeightedNetwork",
+    "ExcitatoryInhibitoryNetwork",
     "MODEL_REGISTRY",
     "get_model",
     "build_weight_matrix",

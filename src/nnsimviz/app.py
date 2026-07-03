@@ -45,7 +45,17 @@ def read_config_from_sidebar() -> ProjectConfig:
     n_neurons = st.sidebar.slider("Number of neurons", 2, 100, 20)
     connection_probability = st.sidebar.slider("Connection probability", 0.0, 1.0, 0.3, 0.05)
     weight_scale = st.sidebar.slider("Weight scale", 0.1, 3.0, 1.0, 0.1)
-    positive_connection_ratio = st.sidebar.slider("Positive connection ratio", 0.0, 1.0, 0.7, 0.05)
+    positive_connection_ratio = st.sidebar.slider(
+    "Positive / excitatory ratio",
+    0.0,
+    1.0,
+    0.7,
+    0.05,
+    help=(
+        "For Random Weighted Network: fraction of positive edges. "
+        "For Excitatory/Inhibitory Network: fraction of excitatory neurons."
+        ),
+    )
     random_seed = st.sidebar.number_input("Random seed", 0, 10_000, 42, 1)
 
     network = NetworkConfig(
