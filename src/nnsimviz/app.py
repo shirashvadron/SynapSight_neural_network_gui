@@ -58,6 +58,33 @@ def read_config_from_sidebar() -> ProjectConfig:
     )
     random_seed = st.sidebar.number_input("Random seed", 0, 10_000, 42, 1)
 
+    n_modules = 4
+    inter_module_probability = 0.05
+
+    if model_type == "modular":
+        st.sidebar.subheader("Modular network")
+
+        n_modules = st.sidebar.slider(
+            "Number of modules",
+            min_value=1,
+            max_value=max(1, int(n_neurons)),
+            value=min(4, int(n_neurons)),
+            step=1,
+            help="Number of communities in the modular network.",
+        )
+
+        inter_module_probability = st.sidebar.slider(
+            "Inter-module connection probability",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.05,
+            step=0.01,
+            help=(
+                "Connection probability between neurons in different modules. "
+                "Lower values create more separated modules."
+            ),
+        )
+
     network = NetworkConfig(
         n_neurons=int(n_neurons),
         connection_probability=connection_probability,
@@ -69,23 +96,6 @@ def read_config_from_sidebar() -> ProjectConfig:
         inter_module_probability=inter_module_probability,
     )
 
-    n_modules = st.sidebar.slider(
-        "Number of modules",
-        min_value=1,
-        max_value=max(1, n_neurons),
-        value=min(4, n_neurons),
-        step=1,
-        help="Used by the Modular Network model.",
-    )
-
-    inter_module_probability = st.sidebar.slider(
-        "Inter-module connection probability",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.05,
-        step=0.01,
-        help="Used by the Modular Network model. Lower values create more separated modules.",
-    )
 
     # ---- Simulation ----
     st.sidebar.header("Simulation")
