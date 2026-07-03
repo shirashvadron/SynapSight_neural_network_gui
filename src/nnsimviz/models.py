@@ -117,12 +117,65 @@ class ExcitatoryInhibitoryNetwork:
         weights = magnitudes * source_signs[np.newaxis, :] * mask
         return weights
 
+
+class SymmetricWeightedNetwork:
+    """A random weighted network with symmetric reciprocal connections.
+
+    This model creates an undirected-style recurrent network where every
+    connection is reciprocal and has the same weight in both directions.
+
+    Matrix convention:
+        W[i, j] is the connection from source neuron j to target neuron i.
+
+    Symmetry means:
+        W[i, j] == W[j, i]
+    """
+
+    name = "Symmetric Weighted Network"
+    description = (
+        "A random weighted network with reciprocal connections. "
+        "Every connection has the same weight in both directions."
+    )
+    equation = "W[i, j] = W[j, i]"
+
+    def generate(self, config: NetworkConfig) -> np.ndarray:
+        """Build and return a symmetric weight matrix."""
+        config.validate()
+
+        n = config.n_neurons
+        rng = np.random.default_rng(config.random_seed)
+
+        # Sample only the upper triangle, then mirror it.
+        connection_mask = rng.random((n, n)) < config.connection_probability
+        connection_mask = np.triu(connection_mask, k=1)
+
+        magnitudes = np.abs(
+            rng.normal(
+                loc=0.0,
+                scale=config.weight_scale,
+                size=(n, n),
+            )
+        )
+
+        signs = np.where(
+            rng.random((n, n)) < config.positive_connection_ratio,
+            1.0,
+            -1.0,
+        )
+
+        upper_weights = connection_mask * magnitudes * signs
+
+        weights = upper_weights + upper_weights.T
+        return weights
+
+
 # --------------------------------------------------------------------------- #
 # Registry — lets the GUI list available models by key.
 # --------------------------------------------------------------------------- #
 MODEL_REGISTRY: dict[str, NetworkModel] = {
     "random_weighted": RandomWeightedNetwork(),
     "excitatory_inhibitory": ExcitatoryInhibitoryNetwork(),
+    "symmetric_weighted": SymmetricWeightedNetwork(),
 }
 
 

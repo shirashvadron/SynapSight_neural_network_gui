@@ -47,7 +47,7 @@ def read_config_from_sidebar() -> ProjectConfig:
     weight_scale = st.sidebar.slider("Weight scale", 0.1, 3.0, 1.0, 0.1)
     positive_connection_ratio = st.sidebar.slider(
     "Positive / excitatory ratio",
-    0.0,
+    0.0,        
     1.0,
     0.7,
     0.05,

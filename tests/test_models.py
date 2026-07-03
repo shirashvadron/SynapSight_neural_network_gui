@@ -7,6 +7,7 @@ from nnsimviz.configs import NetworkConfig
 from nnsimviz.models import (
     RandomWeightedNetwork,
     ExcitatoryInhibitoryNetwork,
+    SymmetricWeightedNetwork,
     MODEL_REGISTRY,
     get_model,
     build_weight_matrix,
@@ -140,6 +141,95 @@ def test_excitatory_inhibitory_model_is_reproducible_with_seed():
     W2 = build_weight_matrix(cfg)
 
     assert np.array_equal(W1, W2)
+
+
+def test_registry_contains_symmetric_weighted_model():
+    assert "symmetric_weighted" in MODEL_REGISTRY
+    assert isinstance(get_model("symmetric_weighted"), SymmetricWeightedNetwork)
+
+
+def test_symmetric_weighted_model_returns_symmetric_matrix():
+    cfg = NetworkConfig(
+        n_neurons=20,
+        connection_probability=0.5,
+        model_type="symmetric_weighted",
+        random_seed=123,
+    )
+
+    W = build_weight_matrix(cfg)
+
+    assert W.shape == (20, 20)
+    assert np.allclose(W, W.T)
+
+
+def test_symmetric_weighted_model_has_no_self_connections():
+    cfg = NetworkConfig(
+        n_neurons=20,
+        connection_probability=1.0,
+        model_type="symmetric_weighted",
+        random_seed=123,
+    )
+
+    W = build_weight_matrix(cfg)
+
+    assert np.allclose(np.diag(W), 0.0)
+
+
+def test_symmetric_weighted_model_is_reproducible_with_seed():
+    cfg = NetworkConfig(
+        n_neurons=20,
+        connection_probability=0.4,
+        model_type="symmetric_weighted",
+        random_seed=999,
+    )
+
+    W1 = build_weight_matrix(cfg)
+    W2 = build_weight_matrix(cfg)
+
+    assert np.array_equal(W1, W2)
+
+
+def test_symmetric_weighted_model_zero_connection_probability_gives_empty_matrix():
+    cfg = NetworkConfig(
+        n_neurons=20,
+        connection_probability=0.0,
+        model_type="symmetric_weighted",
+        random_seed=123,
+    )
+
+    W = build_weight_matrix(cfg)
+
+    assert np.allclose(W, 0.0)
+
+
+def test_symmetric_weighted_model_all_positive_when_ratio_is_one():
+    cfg = NetworkConfig(
+        n_neurons=10,
+        connection_probability=1.0,
+        positive_connection_ratio=1.0,
+        model_type="symmetric_weighted",
+        random_seed=123,
+    )
+
+    W = build_weight_matrix(cfg)
+    off_diagonal = W[~np.eye(W.shape[0], dtype=bool)]
+
+    assert np.all(off_diagonal > 0)
+
+
+def test_symmetric_weighted_model_all_negative_when_ratio_is_zero():
+    cfg = NetworkConfig(
+        n_neurons=10,
+        connection_probability=1.0,
+        positive_connection_ratio=0.0,
+        model_type="symmetric_weighted",
+        random_seed=123,
+    )
+
+    W = build_weight_matrix(cfg)
+    off_diagonal = W[~np.eye(W.shape[0], dtype=bool)]
+
+    assert np.all(off_diagonal < 0)
 
 
 if __name__ == "__main__":
