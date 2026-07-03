@@ -109,3 +109,9 @@ class TestIntegration:
         for field in ("time", "activity", "final_state",
                       "weight_matrix", "config", "metadata"):
             assert hasattr(result, field)
+
+
+if __name__ == "__main__":
+    test_names = [name for name in globals() if name.startswith("test_")]
+    # the -v flag is for verbose output, and the -k flag allows us to specify which tests to run
+    pytest.main(["-v", "-k", " or ".join(test_names)])

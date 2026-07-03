@@ -81,3 +81,9 @@ def test_reproducible_runs():
     r1 = Simulator().run(cfg, W)
     r2 = Simulator().run(cfg, W)
     assert np.array_equal(r1.activity, r2.activity)
+
+
+if __name__ == "__main__":
+    test_names = [name for name in globals() if name.startswith("test_")]
+    # the -v flag is for verbose output, and the -k flag allows us to specify which tests to run
+    pytest.main(["-v", "-k", " or ".join(test_names)])

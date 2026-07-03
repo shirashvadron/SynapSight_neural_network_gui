@@ -73,3 +73,9 @@ def test_unknown_model_raises():
 def test_invalid_config_propagates():
     with pytest.raises(ValueError):
         build_weight_matrix(NetworkConfig(n_neurons=0))
+
+
+if __name__ == "__main__":
+    test_names = [name for name in globals() if name.startswith("test_")]
+    # the -v flag is for verbose output, and the -k flag allows us to specify which tests to run
+    pytest.main(["-v", "-k", " or ".join(test_names)])

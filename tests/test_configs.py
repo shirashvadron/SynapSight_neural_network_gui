@@ -86,3 +86,9 @@ class TestProjectConfig:
         text = json.dumps(cfg.to_dict())
         restored = ProjectConfig.from_dict(json.loads(text))
         assert restored.simulation.duration == cfg.simulation.duration
+
+
+if __name__ == "__main__":
+    test_names = [name for name in globals() if name.startswith("test_")]
+    # the -v flag is for verbose output, and the -k flag allows us to specify which tests to run
+    pytest.main(["-v", "-k", " or ".join(test_names)])
