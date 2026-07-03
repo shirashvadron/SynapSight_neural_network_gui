@@ -169,6 +169,62 @@ class SymmetricWeightedNetwork:
         return weights
 
 
+class ModularNetwork:
+    """A random weighted network with community structure.
+
+    Neurons are divided into modules. Connections within the same module use
+    `connection_probability`, while connections between different modules use
+    `inter_module_probability`.
+
+    Matrix convention:
+        W[i, j] is the connection from source neuron j to target neuron i.
+    """
+
+    name = "Modular Network"
+    description = (
+        "A community-structured recurrent network. Neurons are divided into "
+        "modules with dense within-module connectivity and sparse between-module "
+        "connectivity."
+    )
+    equation = "P(edge) = p_in if same module else p_out"
+
+    def generate(self, config: NetworkConfig) -> np.ndarray:
+        """Build and return a modular weight matrix."""
+        config.validate()
+
+        n = config.n_neurons
+        rng = np.random.default_rng(config.random_seed)
+
+        module_ids = np.arange(n) % config.n_modules
+
+        same_module = module_ids[:, np.newaxis] == module_ids[np.newaxis, :]
+
+        connection_probabilities = np.where(
+            same_module,
+            config.connection_probability,
+            config.inter_module_probability,
+        )
+
+        connection_mask = rng.random((n, n)) < connection_probabilities
+        np.fill_diagonal(connection_mask, False)
+
+        magnitudes = np.abs(
+            rng.normal(
+                loc=0.0,
+                scale=config.weight_scale,
+                size=(n, n),
+            )
+        )
+
+        signs = np.where(
+            rng.random((n, n)) < config.positive_connection_ratio,
+            1.0,
+            -1.0,
+        )
+
+        return connection_mask * magnitudes * signs
+
+
 # --------------------------------------------------------------------------- #
 # Registry — lets the GUI list available models by key.
 # --------------------------------------------------------------------------- #
@@ -176,6 +232,7 @@ MODEL_REGISTRY: dict[str, NetworkModel] = {
     "random_weighted": RandomWeightedNetwork(),
     "excitatory_inhibitory": ExcitatoryInhibitoryNetwork(),
     "symmetric_weighted": SymmetricWeightedNetwork(),
+    "modular": ModularNetwork(),
 }
 
 

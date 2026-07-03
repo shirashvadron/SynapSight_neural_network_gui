@@ -39,6 +39,8 @@ class NetworkConfig:
     positive_connection_ratio: float = 0.7
     model_type: str = "random_weighted"
     random_seed: int = 42
+    n_modules: int = 4
+    inter_module_probability: float = 0.05
 
     def validate(self) -> None:
         """Raise ValueError if any field is out of its valid range."""
@@ -50,6 +52,12 @@ class NetworkConfig:
             raise ValueError("weight_scale must be positive.")
         if not 0.0 <= self.positive_connection_ratio <= 1.0:
             raise ValueError("positive_connection_ratio must be in [0, 1].")
+        if self.n_modules <= 0:
+            raise ValueError("n_modules must be positive")
+        if self.model_type == "modular" and self.n_modules > self.n_neurons:
+            raise ValueError("n_modules cannot be larger than n_neurons")
+        if not 0.0 <= self.inter_module_probability <= 1.0:
+            raise ValueError("inter_module_probability must be between 0 and 1")
 
 
 # --------------------------------------------------------------------------- #
