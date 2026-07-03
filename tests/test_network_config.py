@@ -85,6 +85,37 @@ def test_network_config_rejects_positive_connection_ratio_outside_unit_interval(
         NetworkConfig(positive_connection_ratio=positive_connection_ratio).validate()
 
 
+@pytest.mark.parametrize("n_modules", [0, -1])
+def test_network_config_rejects_non_positive_module_count(n_modules: int) -> None:
+    with pytest.raises(ValueError, match="n_modules"):
+        NetworkConfig(n_modules=n_modules).validate()
+
+
+def test_network_config_rejects_more_modules_than_neurons_for_modular_model() -> None:
+    with pytest.raises(ValueError, match="n_modules"):
+        NetworkConfig(
+            n_neurons=3,
+            n_modules=4,
+            model_type="modular",
+        ).validate()
+
+
+def test_network_config_allows_more_modules_than_neurons_for_non_modular_model() -> None:
+    config = NetworkConfig(
+        n_neurons=3,
+        n_modules=4,
+        model_type="random_weighted",
+    )
+
+    config.validate()
+
+@pytest.mark.parametrize("inter_module_probability", [-0.01, 1.01])
+def test_network_config_rejects_inter_module_probability_outside_unit_interval(
+    inter_module_probability: float,
+) -> None:
+    with pytest.raises(ValueError, match="inter_module_probability"):
+        NetworkConfig(inter_module_probability=inter_module_probability).validate()
+
 def test_network_config_is_plain_data_and_serializable() -> None:
     """NetworkConfig should remain easy to convert to a JSON-compatible dict."""
     config = NetworkConfig(
@@ -94,6 +125,8 @@ def test_network_config_is_plain_data_and_serializable() -> None:
         positive_connection_ratio=0.4,
         model_type="random_weighted",
         random_seed=123,
+        n_modules=3,
+        inter_module_probability=0.1,
     )
 
     config.validate()
@@ -105,4 +138,6 @@ def test_network_config_is_plain_data_and_serializable() -> None:
         "positive_connection_ratio": 0.4,
         "model_type": "random_weighted",
         "random_seed": 123,
+        "n_modules": 3,
+        "inter_module_probability": 0.1,
     }

@@ -65,6 +65,26 @@ def read_config_from_sidebar() -> ProjectConfig:
         positive_connection_ratio=positive_connection_ratio,
         model_type=model_type,
         random_seed=int(random_seed),
+        n_modules=n_modules,
+        inter_module_probability=inter_module_probability,
+    )
+
+    n_modules = st.sidebar.slider(
+        "Number of modules",
+        min_value=1,
+        max_value=max(1, n_neurons),
+        value=min(4, n_neurons),
+        step=1,
+        help="Used by the Modular Network model.",
+    )
+
+    inter_module_probability = st.sidebar.slider(
+        "Inter-module connection probability",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.05,
+        step=0.01,
+        help="Used by the Modular Network model. Lower values create more separated modules.",
     )
 
     # ---- Simulation ----

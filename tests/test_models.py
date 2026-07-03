@@ -8,6 +8,7 @@ from nnsimviz.models import (
     RandomWeightedNetwork,
     ExcitatoryInhibitoryNetwork,
     SymmetricWeightedNetwork,
+    ModularNetwork,
     MODEL_REGISTRY,
     get_model,
     build_weight_matrix,
@@ -230,6 +231,81 @@ def test_symmetric_weighted_model_all_negative_when_ratio_is_zero():
     off_diagonal = W[~np.eye(W.shape[0], dtype=bool)]
 
     assert np.all(off_diagonal < 0)
+
+
+def test_registry_contains_modular_model():
+    assert "modular" in MODEL_REGISTRY
+    assert isinstance(get_model("modular"), ModularNetwork)
+
+
+def test_modular_network_has_no_self_connections():
+    cfg = NetworkConfig(
+        n_neurons=20,
+        n_modules=4,
+        connection_probability=1.0,
+        inter_module_probability=1.0,
+        model_type="modular",
+        random_seed=123,
+    )
+
+    W = build_weight_matrix(cfg)
+
+    assert np.allclose(np.diag(W), 0.0)
+
+
+def test_modular_network_is_reproducible_with_seed():
+    cfg = NetworkConfig(
+        n_neurons=24,
+        n_modules=4,
+        connection_probability=0.8,
+        inter_module_probability=0.1,
+        model_type="modular",
+        random_seed=999,
+    )
+
+    W1 = build_weight_matrix(cfg)
+    W2 = build_weight_matrix(cfg)
+
+    assert np.array_equal(W1, W2)
+
+
+def test_modular_network_respects_zero_inter_module_probability():
+    cfg = NetworkConfig(
+        n_neurons=12,
+        n_modules=3,
+        connection_probability=1.0,
+        inter_module_probability=0.0,
+        model_type="modular",
+        random_seed=123,
+    )
+
+    W = build_weight_matrix(cfg)
+
+    module_ids = np.arange(cfg.n_neurons) % cfg.n_modules
+    different_module = module_ids[:, np.newaxis] != module_ids[np.newaxis, :]
+
+    assert np.allclose(W[different_module], 0.0)
+
+
+def test_modular_network_connects_within_modules_when_probability_is_one():
+    cfg = NetworkConfig(
+        n_neurons=12,
+        n_modules=3,
+        connection_probability=1.0,
+        inter_module_probability=0.0,
+        model_type="modular",
+        random_seed=123,
+    )
+
+    W = build_weight_matrix(cfg)
+
+    module_ids = np.arange(cfg.n_neurons) % cfg.n_modules
+    same_module = module_ids[:, np.newaxis] == module_ids[np.newaxis, :]
+    not_diagonal = ~np.eye(cfg.n_neurons, dtype=bool)
+
+    within_module_off_diagonal = same_module & not_diagonal
+
+    assert np.all(W[within_module_off_diagonal] != 0.0)
 
 
 if __name__ == "__main__":
