@@ -70,11 +70,59 @@ class RandomWeightedNetwork:
         return weights
 
 
+class ExcitatoryInhibitoryNetwork:
+    """A recurrent network with source-neuron excitatory/inhibitory identity.
+
+    Unlike RandomWeightedNetwork, where each edge independently chooses its
+    sign, this model assigns each source neuron a fixed type.
+
+    If neuron j is excitatory, all outgoing weights W[i, j] are positive.
+    If neuron j is inhibitory, all outgoing weights W[i, j] are negative.
+
+    Matrix convention:
+        W[i, j] is the connection from source neuron j to target neuron i.
+    """
+
+    name = "Excitatory/Inhibitory Network"
+    description = (
+        "A randomly connected recurrent network where each neuron has a fixed "
+        "excitatory or inhibitory identity. Excitatory neurons have positive "
+        "outgoing weights; inhibitory neurons have negative outgoing weights."
+    )
+    equation = "W[i, j] = neuron_sign[j] * |N(0, weight_scale)|"
+
+    def generate(self, config: NetworkConfig) -> np.ndarray:
+        """Build and return the weight matrix W."""
+        config.validate()
+        n = config.n_neurons
+        rng = np.random.default_rng(config.random_seed)
+
+        # 1. Connection mask: which directed edges exist.
+        mask = rng.random((n, n)) < config.connection_probability
+        np.fill_diagonal(mask, False)
+
+        # 2. Magnitudes are always positive.
+        magnitudes = np.abs(rng.normal(0.0, config.weight_scale, size=(n, n)))
+
+        # 3. Assign neuron identities.
+        # positive_connection_ratio is interpreted here as the fraction
+        # of excitatory source neurons.
+        n_excitatory = int(round(config.positive_connection_ratio * n))
+
+        source_signs = np.full(n, -1.0)
+        excitatory_sources = rng.choice(n, size=n_excitatory, replace=False)
+        source_signs[excitatory_sources] = 1.0
+
+        # 4. Apply source-neuron sign by column.
+        weights = magnitudes * source_signs[np.newaxis, :] * mask
+        return weights
+
 # --------------------------------------------------------------------------- #
 # Registry — lets the GUI list available models by key.
 # --------------------------------------------------------------------------- #
 MODEL_REGISTRY: dict[str, NetworkModel] = {
     "random_weighted": RandomWeightedNetwork(),
+    "excitatory_inhibitory": ExcitatoryInhibitoryNetwork(),
 }
 
 
