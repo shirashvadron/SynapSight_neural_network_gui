@@ -4,10 +4,13 @@ Given a ProjectConfig and a weight matrix, this module integrates a simple
 continuous-time recurrent rule and returns a SimulationResult. It depends
 only on configs.py and NumPy -- never on the GUI or visualization layers.
 
-Update rule (Euler integration):
+Update rule (Euler-Maruyama integration):
 
-    x[t+1] = x[t] + dt * (-x[t] + W @ tanh(x[t]) + input[t]) + noise
+    x[t+1] = x[t] + dt * (-x[t] + W @ tanh(x[t]) + input[t])
+             + noise_level * sqrt(dt) * N(0, 1)
 
+Noise is scaled by sqrt(dt) (Euler-Maruyama convention) so the effective
+noise intensity remains constant as dt shrinks.
 State values are clipped each step to keep the demo numerically stable.
 """
 
@@ -96,11 +99,13 @@ class Simulator:
         activity = np.zeros((n, n_steps))
         x = rng.normal(0.0, 0.1, size=n)  # small random initial state
         inputs = _build_input(sim, n, n_steps, rng)
+        sqrt_dt = np.sqrt(sim.dt)  # precompute for Euler-Maruyama noise scaling
 
         for t in range(n_steps):
             activity[:, t] = x
             drive = -x + weight_matrix @ np.tanh(x) + inputs[:, t]
-            noise = rng.normal(0.0, sim.noise_level, size=n) if sim.noise_level > 0 else 0.0
+            # Euler-Maruyama: noise scaled by sqrt(dt) to maintain correct SDE intensity
+            noise = rng.normal(0.0, sim.noise_level * sqrt_dt, size=n) if sim.noise_level > 0 else 0.0
             x = x + sim.dt * drive + noise
             x = np.clip(x, -self.CLIP, self.CLIP)
 
