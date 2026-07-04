@@ -111,14 +111,24 @@ def _compute_pca_projection(activity: np.ndarray) -> tuple[np.ndarray, np.ndarra
     components : (2, n_neurons)  the two principal directions
     explained  : (2,)  fraction of variance explained by each PC
     """
-    # centre across neurons (each neuron zero-mean over time)
     X = activity - activity.mean(axis=1, keepdims=True)   # (n, T)
-    # SVD of the transposed matrix -> (T, n) so rows are observations
+    n, T = activity.shape
+
     U, s, Vt = np.linalg.svd(X.T, full_matrices=False)    # U:(T,k), s:(k,), Vt:(k,n)
+    k = s.shape[0]
     total_var = (s ** 2).sum() or 1.0
-    coords = U * s                                          # (T, k)  projected scores
-    explained = (s[:2] ** 2) / total_var
-    return coords[:, :2], Vt[:2], explained
+
+    coords = U * s  # (T, k)
+
+    if k < 2:
+        coords = np.hstack([coords, np.zeros((T, 2 - k))])
+        components = np.vstack([Vt, np.zeros((2 - k, n))])
+        explained = np.concatenate([(s ** 2) / total_var, np.zeros(2 - k)])
+    else:
+        components = Vt[:2]
+        explained = (s[:2] ** 2) / total_var
+
+    return coords[:, :2], components[:2], explained[:2]
 
 
 def _find_fixed_points_pca(
