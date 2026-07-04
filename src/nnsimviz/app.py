@@ -19,6 +19,7 @@ from nnsimviz.configs import (
     ProjectConfig,
     SimulationConfig,
     VisualizationConfig,
+    VALID_INTEGRATION_METHODS,
 )
 from nnsimviz.models import MODEL_REGISTRY, build_weight_matrix
 from nnsimviz.simulation import Simulator
@@ -36,11 +37,6 @@ from nnsimviz import io_utils
 st.set_page_config(page_title="Neural Network Simulator", layout="wide")
 
 # Feature #2: show the word "Parameters" next to the sidebar-expand arrow.
-# When the sidebar is collapsed, Streamlit shows only a small ">>" button; on
-# its own, nothing tells the user a parameters panel is hidden there. This CSS
-# appends a "Parameters" label to that button. The real element id in current
-# Streamlit is `stExpandSidebarButton`; older names are kept as fallbacks so
-# the label still appears on other versions your teammates might run.
 st.markdown(
     """
     <style>
@@ -67,7 +63,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Human-readable labels for the layout dropdown (feature #5).
+# Human-readable labels for the layout dropdown.
 _LAYOUT_LABELS = {
     "spring": "Spring (force-directed)",
     "circular": "Circular",
@@ -76,11 +72,17 @@ _LAYOUT_LABELS = {
     "random": "Random",
 }
 
-# Plotly modebar config: enables zoom/pan/box-zoom/reset, and sets the
-# built-in camera button to download a PNG (feature #1, dependency-free).
+# Human-readable labels for integration method dropdown.
+_METHOD_LABELS = {
+    "euler": "Euler-Maruyama (1st order, fast)",
+    "heun": "Heun / Improved Euler (2nd order)",
+    "rk4": "Runge-Kutta 4 (4th order, accurate)",
+}
+
+# Plotly modebar config.
 _PLOT_CONFIG = {
     "displayModeBar": True,
-    "scrollZoom": True,  # supports scroll/double-click zoom (feature #8)
+    "scrollZoom": True,
     "toImageButtonOptions": {"format": "png", "filename": "neural_network_graph",
                              "scale": 2},
     "modeBarButtonsToRemove": ["lasso2d", "select2d"],
@@ -93,25 +95,20 @@ _PLOT_CONFIG = {
 def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
     """Read every sidebar widget and assemble a ProjectConfig.
 
-    Each widget carries a `help=` string, which Streamlit renders as a small
-    "i"/"?" icon that reveals a short explanation on hover (feature #3). The
-    strings come from the help_texts module: once the user picks a model, the
-    matching HelpTexts object is fetched and used for every control, so the
-    tooltips adapt automatically to the selected network.
+    Each widget carries a `help=` string rendered as a tooltip (feature #3).
+    Strings come from help_texts and adapt to the selected model automatically.
     """
     st.sidebar.title("Parameters")
 
     # ---- Network ----
     st.sidebar.header("Network")
     model_keys = list(MODEL_REGISTRY)
-    # The model tooltip itself uses the shared default (no model chosen yet).
     model_type = st.sidebar.selectbox(
         "Model", model_keys,
         format_func=lambda k: MODEL_REGISTRY[k].name,
         help=get_help_texts("").model,
     )
 
-    # Fetch the help texts for the chosen model; every control below uses them.
     txt = get_help_texts(model_type)
 
     n_neurons = st.sidebar.slider(
@@ -181,12 +178,44 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
         "Noise level", 0.0, 1.0, 0.05, 0.01, help=txt.noise_level,
     )
 
+    # ---- Integration method (step function) ----
+    integration_method = st.sidebar.selectbox(
+        "Integration method",
+        list(VALID_INTEGRATION_METHODS),
+        index=0,
+        format_func=lambda k: _METHOD_LABELS.get(k, k),
+        help=txt.integration_method,
+    )
+
+    # ---- Convergence epsilon ----
+    use_convergence = st.sidebar.checkbox(
+        "Enable early convergence stop",
+        value=False,
+        help=txt.convergence_eps,
+    )
+    convergence_eps: float | None = None
+    if use_convergence:
+        convergence_eps = st.sidebar.number_input(
+            "Convergence epsilon (\u03b5)",
+            min_value=1e-8,
+            max_value=1.0,
+            value=1e-4,
+            format="%e",
+            step=1e-5,
+            help=(
+                "The simulation stops early once max|x[t] \u2212 x[t\u22121]| < \u03b5. "
+                "The remaining time steps are filled with the settled state."
+            ),
+        )
+
     simulation = SimulationConfig(
         duration=duration,
         dt=dt,
         input_type=input_type,
         input_amplitude=input_amplitude,
         noise_level=noise_level,
+        integration_method=integration_method,
+        convergence_eps=convergence_eps,
     )
 
     # ---- Visualization ----
@@ -229,6 +258,8 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
     )
 
     return config, imported_weight_matrix
+
+
 # --------------------------------------------------------------------------- #
 # Streamlit upload control
 # --------------------------------------------------------------------------- #
@@ -306,7 +337,6 @@ def main() -> None:
 
     config, imported_weight_matrix = read_config_from_sidebar()
 
-    # Validate up front so the user gets a clear message, not a traceback.
     try:
         config.validate()
     except ValueError as exc:
@@ -334,7 +364,6 @@ def main() -> None:
     )
 
     with tab_graph:
-        # Feature #7: the model name is shown above the graph (also in title).
         st.subheader(f"Network graph \u2014 {model_name}")
         st.caption(
             "Tip: use the toolbar (top-right of the plot) to zoom, pan, or "
@@ -345,6 +374,15 @@ def main() -> None:
 
     with tab_activity:
         st.subheader("Activity over time")
+        # Show convergence info if early-stop was triggered.
+        converged_at = result.metadata.get("converged_at")
+        if converged_at is not None:
+            conv_time = round(converged_at * result.config.simulation.dt, 4)
+            st.info(
+                f"\u2705 Converged early at step {converged_at} "
+                f"(t \u2248 {conv_time}). "
+                "Remaining time steps are filled with the settled state."
+            )
         act_fig = build_activity_figure(result)
         st.plotly_chart(act_fig, use_container_width=True, config=_PLOT_CONFIG)
 
@@ -368,17 +406,18 @@ def main() -> None:
     c4.metric("Negative edges", n_neg)
     c5.metric("Time steps", result.metadata["n_steps"])
 
+    # ---- convergence / method badges ----
+    method_used = result.metadata.get("integration_method", "euler")
+    badge_col1, badge_col2, _spacer2 = st.columns([1, 1, 6])
+    badge_col1.caption(f"**Integration:** {_METHOD_LABELS.get(method_used, method_used)}")
+    if converged_at is not None:
+        badge_col2.caption(f"**Converged at step:** {converged_at}")
+    else:
+        badge_col2.caption("**Convergence:** not triggered")
+
     # ---- exports ----
     st.subheader("Export")
 
-    # Feature #1: an "Image - PNG" button placed in the export row, alongside
-    # the JSON/CSV buttons. It triggers the browser's own Plotly image
-    # download (the same mechanism as the camera icon on the toolbar), so it
-    # needs no server-side image library (no kaleido / Chrome).
-    #
-    # The button needs a Plotly graph in the page to capture, but we do NOT
-    # want a second visible graph. So we render the figure inside a zero-size,
-    # hidden container and only surface the button itself.
     graph_fig = build_figure(result)
     hidden_div = graph_fig.to_html(include_plotlyjs="cdn", full_html=False,
                                    div_id="png_export_fig")
@@ -410,9 +449,6 @@ def main() -> None:
     </script>
     """
 
-    # Narrow columns sized close to each button's own width, with a spacer
-    # column at the end absorbing the leftover space -- so the four buttons
-    # sit next to each other instead of being stretched across the full row.
     e1, e2, e3, e4, _spacer = st.columns([1, 1, 1, 1, 4], vertical_alignment="bottom")
     with e1:
         components.html(png_component, height=39)

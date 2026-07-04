@@ -85,6 +85,22 @@ class HelpTexts:
     input_amplitude: str = "Strength of the external input signal."
     noise_level: str = "Amount of random fluctuation added at each time step."
 
+    # ---- Integration method (step function) ----
+    integration_method: str = (
+        "Numerical integrator used for the simulation time-loop. "
+        "Euler-Maruyama is fast; Heun adds a corrector step (2nd order); "
+        "RK4 uses four evaluations per step for the highest accuracy. "
+        "Higher-order methods are more stable with larger dt values."
+    )
+
+    # ---- Convergence epsilon ----
+    convergence_eps: str = (
+        "Enable early-exit: if the maximum state change between consecutive "
+        "steps falls below \u03b5, the simulation is considered converged and "
+        "stops. The remaining time steps are filled with the settled state. "
+        "Leave disabled to always run the full duration."
+    )
+
     # ---- Visualization ----
     layout: str = (
         "How node positions are arranged. Different layouts reveal different "
