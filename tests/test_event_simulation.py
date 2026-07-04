@@ -28,6 +28,33 @@ def test_threshold_crossing_creates_spike():
     result = EventBasedSimulator().run(cfg, W)
     assert result.metadata["spike_times"] == [(0, 0)]
     assert result.metadata["spike_counts"][0] == 1
+    assert result.metadata["spike_train"][0, 0] == 1
+
+
+def test_spike_recording_preserves_pre_reset_activation():
+    W = np.zeros((3, 3))
+    cfg = _event_config(default_input_neuron=0, default_input_value=1.0)
+    result = EventBasedSimulator().run(cfg, W)
+
+    pre_reset = result.metadata["activation_before_reset"]
+    spike_train = result.metadata["spike_train"]
+
+    assert pre_reset.shape == result.activity.shape
+    assert spike_train.shape == result.activity.shape
+    assert pre_reset[0, 0] == 1.0
+    assert spike_train[0, 0] == 1
+    assert result.activity[0, 0] == 0.0
+
+
+def test_downstream_spike_is_visible_before_reset():
+    W = np.zeros((3, 3))
+    W[1, 0] = 1.2
+    cfg = _event_config(default_input_neuron=0, default_input_value=1.0)
+    result = EventBasedSimulator().run(cfg, W)
+
+    assert result.metadata["activation_before_reset"][1, 1] == 1.2
+    assert result.metadata["spike_train"][1, 1] == 1
+    assert result.activity[1, 1] == 0.0
 
 
 def test_excitatory_connection_increases_target_activation():
