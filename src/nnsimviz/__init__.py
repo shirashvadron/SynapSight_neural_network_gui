@@ -20,6 +20,7 @@ from .configs import (
     SimulationConfig,
     VisualizationConfig,
     ProjectConfig,
+    EventSimulationConfig,
 )
 from .models import (
     NetworkModel,
@@ -33,6 +34,8 @@ from .models import (
 )
 from .simulation import Simulator, SimulationResult
 from .visualization import NetworkVisualizer, build_figure
+from .event_simulation import EventBasedSimulator
+from .pipeline import run_pipeline
 
 __version__ = "0.1.0"
 
@@ -53,5 +56,8 @@ __all__ = [
     "SimulationResult",
     "NetworkVisualizer",
     "build_figure",
+    "EventSimulationConfig",
+    "EventBasedSimulator",
+    "run_pipeline",
     "__version__",
 ]

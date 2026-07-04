@@ -1,4 +1,4 @@
-"""Streamlit GUI: a thin orchestrator over the pipeline modules.
+﻿"""Streamlit GUI: a thin orchestrator over the pipeline modules.
 
 This layer only reads widget values, builds a ProjectConfig, and calls the
 model -> simulation -> visualization modules in sequence, then displays the
@@ -19,16 +19,21 @@ from nnsimviz.configs import (
     ProjectConfig,
     SimulationConfig,
     VisualizationConfig,
+    EventSimulationConfig,
+    VALID_SIMULATION_TYPES,
     VALID_INTEGRATION_METHODS,
 )
-from nnsimviz.models import MODEL_REGISTRY, build_weight_matrix
-from nnsimviz.simulation import Simulator
+
+from nnsimviz.models import MODEL_REGISTRY
+from nnsimviz.pipeline import run_pipeline
+
 from nnsimviz.visualization import (
     build_figure,
     build_activity_figure,
     build_animated_figure,
     build_pca_animation_figure,
     NetworkVisualizer,
+    build_event_raster_figure,
     AVAILABLE_LAYOUTS,
 )
 from nnsimviz.help_texts import get_help_texts
@@ -89,6 +94,10 @@ _PLOT_CONFIG = {
     "modeBarButtonsToRemove": ["lasso2d", "select2d"],
 }
 
+_SIMULATION_TYPE_LABELS = {
+    "continuous": "Continuous recurrent dynamics",
+    "event_based": "Event-based / spike-like",
+}
 
 # --------------------------------------------------------------------------- #
 # Sidebar controls -> ProjectConfig
@@ -100,6 +109,16 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
     Strings come from help_texts and adapt to the selected model automatically.
     """
     st.sidebar.title("Parameters")
+    simulation_type = st.sidebar.selectbox(
+        "Simulation type",
+        VALID_SIMULATION_TYPES,
+        index=0,
+        format_func=lambda k: _SIMULATION_TYPE_LABELS.get(k, k),
+        help=(
+            "Choose the simulation engine: original continuous dynamics or "
+            "event-based spike propagation."
+        ),
+    )
 
     # ---- Network ----
     st.sidebar.header("Network")
@@ -161,53 +180,107 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
         network.n_neurons = int(imported_weight_matrix.shape[0])
 
     # ---- Simulation ----
+    
     st.sidebar.header("Simulation")
-    duration = st.sidebar.slider(
-        "Duration", 1.0, 50.0, 10.0, 1.0, help=txt.duration,
-    )
-    dt = st.sidebar.slider(
-        "Time step (dt)", 0.01, 1.0, 0.1, 0.01, help=txt.dt,
-    )
-    input_type = st.sidebar.selectbox(
-        "Input type", SimulationConfig.VALID_INPUT_TYPES, index=1,
-        help=txt.input_type,
-    )
-    input_amplitude = st.sidebar.slider(
-        "Input amplitude", 0.0, 5.0, 1.0, 0.1, help=txt.input_amplitude,
-    )
-    noise_level = st.sidebar.slider(
-        "Noise level", 0.0, 1.0, 0.05, 0.01, help=txt.noise_level,
-    )
+    event = EventSimulationConfig()
 
-    # ---- Integration method (step function) ----
-    integration_method = st.sidebar.selectbox(
-        "Integration method",
-        list(VALID_INTEGRATION_METHODS),
-        index=0,
-        format_func=lambda k: _METHOD_LABELS.get(k, k),
-        help=txt.integration_method,
-    )
-
-    # ---- Convergence epsilon ----
-    use_convergence = st.sidebar.checkbox(
-        "Enable early convergence stop",
-        value=False,
-        help=txt.convergence_eps,
-    )
-    convergence_eps: float | None = None
-    if use_convergence:
-        convergence_eps = st.sidebar.number_input(
-            "Convergence epsilon (\u03b5)",
-            min_value=1e-8,
-            max_value=1.0,
-            value=1e-4,
-            format="%e",
-            step=1e-5,
-            help=(
-                "The simulation stops early once max|x[t] \u2212 x[t\u22121]| < \u03b5. "
-                "The remaining time steps are filled with the settled state."
-            ),
+    if simulation_type == "continuous":
+        duration = st.sidebar.slider(
+            "Duration", 1.0, 50.0, 10.0, 1.0, help=txt.duration,
         )
+        dt = st.sidebar.slider(
+            "Time step (dt)", 0.01, 1.0, 0.1, 0.01, help=txt.dt,
+        )
+        input_type = st.sidebar.selectbox(
+            "Input type", SimulationConfig.VALID_INPUT_TYPES, index=1,
+            help=txt.input_type,
+        )
+        input_amplitude = st.sidebar.slider(
+            "Input amplitude", 0.0, 5.0, 1.0, 0.1, help=txt.input_amplitude,
+        )
+        noise_level = st.sidebar.slider(
+            "Noise level", 0.0, 1.0, 0.05, 0.01, help=txt.noise_level,
+        )
+
+        integration_method = st.sidebar.selectbox(
+            "Integration method",
+            list(VALID_INTEGRATION_METHODS),
+            index=0,
+            format_func=lambda k: _METHOD_LABELS.get(k, k),
+            help=txt.integration_method,
+        )
+
+        use_convergence = st.sidebar.checkbox(
+            "Enable early convergence stop",
+            value=False,
+            help=txt.convergence_eps,
+        )
+        convergence_eps: float | None = None
+        if use_convergence:
+            convergence_eps = st.sidebar.number_input(
+                "Convergence epsilon (ε)",
+                min_value=1e-8,
+                max_value=1.0,
+                value=1e-4,
+                format="%e",
+                step=1e-5,
+                help=(
+                    "The simulation stops early once max|x[t] − x[t−1]| < ε. "
+                    "The remaining time steps are filled with the settled state."
+                ),
+            )
+    else:
+        st.sidebar.caption(
+            "Event mode uses the same network/imported W, but updates mainly "
+            "when spike events occur."
+        )
+        event_max_steps = st.sidebar.slider(
+            "Event steps", 1, 200, 20, 1,
+            help="Number of discrete event steps to simulate.",
+        )
+        event_threshold = st.sidebar.number_input(
+            "Spike threshold", min_value=0.001, value=1.0, step=0.1,
+            help="A neuron emits a spike when activation is at or above this value.",
+        )
+        event_reset_value = st.sidebar.number_input(
+            "Reset value", value=0.0, step=0.1,
+            help="Neuron activation after it spikes.",
+        )
+        event_decay = st.sidebar.slider(
+            "Activation decay per step", 0.0, 1.0, 0.0, 0.05,
+            help="Fraction of activation removed at the end of each event step.",
+        )
+        default_input_neuron = st.sidebar.number_input(
+            "Default input neuron",
+            min_value=0,
+            max_value=max(0, int(network.n_neurons) - 1),
+            value=0,
+            step=1,
+            help="Target neuron for the default external event at step 0.",
+        )
+        default_input_value = st.sidebar.number_input(
+            "Default input value",
+            value=1.0,
+            step=0.1,
+            help="Injected at step 0 if no custom events are provided.",
+        )
+
+        event = EventSimulationConfig(
+            max_steps=int(event_max_steps),
+            threshold=float(event_threshold),
+            reset_value=float(event_reset_value),
+            decay=float(event_decay),
+            default_input_neuron=int(default_input_neuron),
+            default_input_value=float(default_input_value),
+        )
+
+        duration = float(event.max_steps + 1)
+        dt = 1.0
+        input_type = "none"
+        input_amplitude = 0.0
+        noise_level = 0.0
+        integration_method = "euler"
+        convergence_eps = None
 
     simulation = SimulationConfig(
         duration=duration,
@@ -217,7 +290,11 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
         noise_level=noise_level,
         integration_method=integration_method,
         convergence_eps=convergence_eps,
+        simulation_type=simulation_type,
     )
+
+
+   
 
     # ---- Visualization ----
     st.sidebar.header("Visualization")
@@ -256,6 +333,7 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
         network=network,
         simulation=simulation,
         visualization=visualization,
+        event=event,
     )
 
     return config, imported_weight_matrix
@@ -306,25 +384,90 @@ def read_imported_weight_matrix_from_sidebar():
     return W
 
 
-# --------------------------------------------------------------------------- #
-# Pipeline (orchestration only)
-# --------------------------------------------------------------------------- #
-def run_pipeline(config: ProjectConfig, imported_weight_matrix=None):
-    """model/import -> simulation -> result. Returns the SimulationResult."""
-    if imported_weight_matrix is None:
-        weight_matrix = build_weight_matrix(config.network)
-        result = Simulator().run(config, weight_matrix)
-        result.metadata["network_source"] = "generated"
-        return result
+def _show_continuous_result(result, model_name: str) -> None:
+    """Render the original continuous-simulation tabs."""
+    tab_graph, tab_activity, tab_anim, tab_pca = st.tabs(
+        ["Network graph", "Activity over time", "Animation", "Animated PCA"]
+    )
 
-    weight_matrix = io_utils.validate_weight_matrix(imported_weight_matrix)
-    config.network.n_neurons = weight_matrix.shape[0]
+    with tab_graph:
+        st.subheader(f"Network graph — {model_name}")
+        st.caption(
+            "Tip: use the toolbar (top-right of the plot) to zoom, pan, or "
+            "download a PNG with the camera icon. Double-click the plot to reset."
+        )
+        fig = build_figure(result)
+        st.plotly_chart(fig, use_container_width=True, config=_PLOT_CONFIG)
 
-    result = Simulator().run(config, weight_matrix)
-    result.metadata["network_source"] = "imported"
-    result.metadata["network_source_name"] = "Imported weight matrix"
-    return result
+    with tab_activity:
+        st.subheader("Activity over time")
+        converged_at = result.metadata.get("converged_at")
+        if converged_at is not None:
+            conv_time = round(converged_at * result.config.simulation.dt, 4)
+            st.info(
+                f"✅ Converged early at step {converged_at} "
+                f"(t ≈ {conv_time}). "
+                "Remaining time steps are filled with the settled state."
+            )
+        act_fig = build_activity_figure(result)
+        st.plotly_chart(act_fig, use_container_width=True, config=_PLOT_CONFIG)
 
+    with tab_anim:
+        st.subheader("Activity animation")
+        st.caption("Press ▶ Play to watch node activity evolve over time.")
+        anim_fig = build_animated_figure(result)
+        st.plotly_chart(anim_fig, use_container_width=True, config=_PLOT_CONFIG)
+
+    with tab_pca:
+        st.subheader("Animated PCA — state-space trajectory")
+        st.caption(
+            "The network’s N-dimensional activity vector is projected onto its "
+            "first two principal components. The moving dot traces the collective "
+            "state through PC-space over time. "
+            "🟢 Green stars = stable fixed points · "
+            "🟠 Orange diamonds = unstable fixed points."
+        )
+        pca_fig = build_pca_animation_figure(result)
+        st.plotly_chart(pca_fig, use_container_width=True, config=_PLOT_CONFIG)
+
+
+def _show_event_result(result, model_name: str) -> None:
+    """Render event-based/spike-like tabs."""
+    tab_graph, tab_raster, tab_activity, tab_anim, tab_pca = st.tabs(
+        ["Network graph", "Spike raster", "Activation over time", "Animation", "Animated PCA"]
+    )
+
+    with tab_graph:
+        st.subheader(f"Network graph — {model_name}")
+        fig = build_figure(result)
+        st.plotly_chart(fig, use_container_width=True, config=_PLOT_CONFIG)
+
+    with tab_raster:
+        st.subheader("Spike raster")
+        st.caption("Each marker is one threshold-crossing spike event.")
+        raster_fig = build_event_raster_figure(result)
+        st.plotly_chart(raster_fig, use_container_width=True, config=_PLOT_CONFIG)
+
+    with tab_activity:
+        st.subheader("Activation over event steps")
+        act_fig = build_activity_figure(result)
+        st.plotly_chart(act_fig, use_container_width=True, config=_PLOT_CONFIG)
+        with st.expander("Event log"):
+            st.dataframe(result.metadata.get("event_log", []), use_container_width=True)
+
+    with tab_anim:
+        st.subheader("Event-state animation")
+        anim_fig = build_animated_figure(result)
+        st.plotly_chart(anim_fig, use_container_width=True, config=_PLOT_CONFIG)
+
+    with tab_pca:
+        st.subheader("Animated PCA — event-state trajectory")
+        st.caption(
+            "The event simulation activity vector is projected onto the first "
+            "two principal components over event steps."
+        )
+        pca_fig = build_pca_animation_figure(result)
+        st.plotly_chart(pca_fig, use_container_width=True, config=_PLOT_CONFIG)
 
 # --------------------------------------------------------------------------- #
 # Main
@@ -359,52 +502,14 @@ def main() -> None:
     if model_name is None:
         model_name = MODEL_REGISTRY[result.config.network.model_type].name
 
-    # ---- four tabs: static graph, activity over time, animation, PCA ---- #
-    tab_graph, tab_activity, tab_anim, tab_pca = st.tabs(
-        ["Network graph", "Activity over time", "Animation", "Animated PCA"]
-    )
 
-    with tab_graph:
-        st.subheader(f"Network graph \u2014 {model_name}")
-        st.caption(
-            "Tip: use the toolbar (top-right of the plot) to zoom, pan, or "
-            "download a PNG with the camera icon. Double-click the plot to reset."
-        )
-        fig = build_figure(result)
-        st.plotly_chart(fig, use_container_width=True, config=_PLOT_CONFIG)
+    if result.config.simulation.simulation_type == "event_based":
+        _show_event_result(result, model_name)
+    else:
+        _show_continuous_result(result, model_name)
 
-    with tab_activity:
-        st.subheader("Activity over time")
-        # Show convergence info if early-stop was triggered.
-        converged_at = result.metadata.get("converged_at")
-        if converged_at is not None:
-            conv_time = round(converged_at * result.config.simulation.dt, 4)
-            st.info(
-                f"\u2705 Converged early at step {converged_at} "
-                f"(t \u2248 {conv_time}). "
-                "Remaining time steps are filled with the settled state."
-            )
-        act_fig = build_activity_figure(result)
-        st.plotly_chart(act_fig, use_container_width=True, config=_PLOT_CONFIG)
-
-    with tab_anim:
-        st.subheader("Activity animation")
-        st.caption("Press \u25b6 Play to watch node activity evolve over time.")
-        anim_fig = build_animated_figure(result)
-        st.plotly_chart(anim_fig, use_container_width=True, config=_PLOT_CONFIG)
-
-    with tab_pca:
-        st.subheader("Animated PCA \u2014 state-space trajectory")
-        st.caption(
-            "The network\u2019s N-dimensional activity vector is projected onto its "
-            "first two principal components. The moving dot traces the collective "
-            "state through PC-space over time. "
-            "\U0001f7e2 Green stars = stable fixed points \u00b7 "
-            "\U0001f7e0 Orange diamonds = unstable fixed points."
-        )
-        pca_fig = build_pca_animation_figure(result)
-        st.plotly_chart(pca_fig, use_container_width=True, config=_PLOT_CONFIG)
-
+    converged_at = result.metadata.get("converged_at")
+   
     # ---- summary ----
     _, edges = NetworkVisualizer(
         result.config.visualization
@@ -422,12 +527,17 @@ def main() -> None:
     # ---- convergence / method badges ----
     method_used = result.metadata.get("integration_method", "euler")
     badge_col1, badge_col2, _spacer2 = st.columns([1, 1, 6])
-    badge_col1.caption(f"**Integration:** {_METHOD_LABELS.get(method_used, method_used)}")
-    if converged_at is not None:
-        badge_col2.caption(f"**Converged at step:** {converged_at}")
+    if result.config.simulation.simulation_type == "event_based":
+        badge_col1.caption("**Mode:** event-based")
+        badge_col2.caption(f"**Spike threshold:** {result.metadata.get('threshold')}")
     else:
-        badge_col2.caption("**Convergence:** not triggered")
+        method_used = result.metadata.get("integration_method", "euler")
+        badge_col1.caption(f"**Integration:** {_METHOD_LABELS.get(method_used, method_used)}")
 
+        if converged_at is not None:
+            badge_col2.caption(f"**Converged at step:** {converged_at}")
+        else:
+            badge_col2.caption("**Convergence:** not triggered")
     # ---- exports ----
     st.subheader("Export")
 
