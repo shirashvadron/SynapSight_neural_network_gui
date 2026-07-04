@@ -1,4 +1,4 @@
-﻿"""Streamlit GUI: a thin orchestrator over the pipeline modules.
+"""Streamlit GUI: a thin orchestrator over the pipeline modules.
 
 This layer only reads widget values, builds a ProjectConfig, and calls the
 model -> simulation -> visualization modules in sequence, then displays the
@@ -26,6 +26,8 @@ from nnsimviz.configs import (
 
 from nnsimviz.models import MODEL_REGISTRY
 from nnsimviz.pipeline import run_pipeline
+from nnsimviz.motifs import MotifConfig, MOTIF_LABELS, MotifType
+from nnsimviz.motif_icons import motif_icon_svg
 
 from nnsimviz.visualization import (
     build_figure,
@@ -179,8 +181,11 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
     if imported_weight_matrix is not None:
         network.n_neurons = int(imported_weight_matrix.shape[0])
 
+    # ---- Motifs ----
+    motifs = read_motif_config_from_sidebar()
+
     # ---- Simulation ----
-    
+
     st.sidebar.header("Simulation")
     event = EventSimulationConfig()
 
@@ -293,9 +298,6 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
         simulation_type=simulation_type,
     )
 
-
-   
-
     # ---- Visualization ----
     st.sidebar.header("Visualization")
     layout_type = st.sidebar.selectbox(
@@ -334,9 +336,97 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
         simulation=simulation,
         visualization=visualization,
         event=event,
+        motifs=motifs,
     )
 
     return config, imported_weight_matrix
+
+
+def _motif_number_input(motif_type: MotifType, default: int, help_text: str) -> int:
+    """Render a motif's schematic icon + a count number input, side by side.
+
+    The small SVG icon (green = excitatory, red = inhibitory) shows the motif's
+    structure at a glance; the number input sets how many to add.
+    """
+    label = MOTIF_LABELS[motif_type]
+    svg = motif_icon_svg(motif_type.value)
+    icon_col, input_col = st.sidebar.columns([1, 2], vertical_alignment="center")
+    with icon_col:
+        st.markdown(
+            f'<div title="{label}" style="display:flex;align-items:center;'
+            f'height:100%;">{svg}</div>',
+            unsafe_allow_html=True,
+        )
+    with input_col:
+        return int(st.number_input(
+            f"{label} count",
+            min_value=0, max_value=50, value=default, step=1,
+            help=help_text,
+        ))
+
+
+def read_motif_config_from_sidebar() -> MotifConfig:
+    """Read the Motifs section of the sidebar into a MotifConfig.
+
+    Kept as a small, self-contained reader: it only gathers widget values and
+    returns a config. All motif-building logic lives in the motifs module.
+    """
+    st.sidebar.header("Motifs")
+    enabled = st.sidebar.checkbox(
+        "Add motifs", value=False,
+        help="Append small repeated connectivity patterns (motifs) as extra "
+             "neurons on top of the base network.",
+    )
+
+    if not enabled:
+        return MotifConfig(enabled=False)
+
+    n_coincidence = _motif_number_input(
+        MotifType.COINCIDENCE_DETECTOR, default=1,
+        help_text="Several excitatory neurons converge (positive edges) onto "
+                  "one target neuron.")
+    n_lateral = _motif_number_input(
+        MotifType.LATERAL_INHIBITION, default=0,
+        help_text="Excitatory neurons that mutually inhibit each other through "
+                  "negative edges (competition).")
+    n_feedback = _motif_number_input(
+        MotifType.NEGATIVE_FEEDBACK_LOOP, default=0,
+        help_text="An excitatory neuron drives another, which sends negative "
+                  "feedback back, forming a regulatory loop.")
+    n_ffl = _motif_number_input(
+        MotifType.FEEDFORWARD_LOOP, default=0,
+        help_text="A drives C both directly and via B. Acts as a filter that "
+                  "passes persistent signals and ignores brief ones.")
+    n_ffi = _motif_number_input(
+        MotifType.FEEDFORWARD_INHIBITION, default=0,
+        help_text="A excites a target and, via an inhibitory interneuron, also "
+                  "inhibits it -- creating a narrow timing window.")
+    n_mutex = _motif_number_input(
+        MotifType.MUTUAL_EXCITATION, default=0,
+        help_text="Two neurons that excite each other, latching into a "
+                  "sustained 'on' state (bistability / simple memory).")
+    strength = st.sidebar.slider(
+        "Motif connection strength", 0.1, 3.0, 1.0, 0.1,
+        help="Scale of the motif edge weights (their signs come from the "
+             "motif structure).",
+    )
+    n_external = st.sidebar.slider(
+        "External connections per motif", 0, 10, 2, 1,
+        help="How many edges link each motif to the base network.",
+    )
+
+    return MotifConfig(
+        enabled=True,
+        n_coincidence_detector=int(n_coincidence),
+        n_lateral_inhibition=int(n_lateral),
+        n_negative_feedback_loop=int(n_feedback),
+        n_feedforward_loop=int(n_ffl),
+        n_feedforward_inhibition=int(n_ffi),
+        n_mutual_excitation=int(n_mutex),
+        connection_strength=strength,
+        n_external_connections=int(n_external),
+        random_seed=42,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -502,14 +592,13 @@ def main() -> None:
     if model_name is None:
         model_name = MODEL_REGISTRY[result.config.network.model_type].name
 
-
     if result.config.simulation.simulation_type == "event_based":
         _show_event_result(result, model_name)
     else:
         _show_continuous_result(result, model_name)
 
     converged_at = result.metadata.get("converged_at")
-   
+
     # ---- summary ----
     _, edges = NetworkVisualizer(
         result.config.visualization
