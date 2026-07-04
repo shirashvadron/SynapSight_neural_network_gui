@@ -4,10 +4,13 @@ Given a ProjectConfig and a weight matrix, this module integrates a simple
 continuous-time recurrent rule and returns a SimulationResult. It depends
 only on configs.py and NumPy -- never on the GUI or visualization layers.
 
-Update rule (Euler integration):
+Supported integration methods (configured via SimulationConfig.integration_method):
+    - "euler": Euler-Maruyama (first-order SDE integrator)
+    - "heun":  Heun / Improved Euler (second-order, noise added once at end)
+    - "rk4":   Classic 4th-order Runge-Kutta (noise added once at end)
 
-    x[t+1] = x[t] + dt * (-x[t] + W @ tanh(x[t]) + input[t]) + noise
-
+Noise is scaled by sqrt(dt) (Euler-Maruyama convention) so the effective
+noise intensity remains constant as dt shrinks.
 State values are clipped each step to keep the demo numerically stable.
 """
 
@@ -65,6 +68,50 @@ def _build_input(sim: SimulationConfig, n_neurons: int, n_steps: int,
 
 
 # --------------------------------------------------------------------------- #
+# ODE right-hand side
+# --------------------------------------------------------------------------- #
+def _rhs(x: np.ndarray, u: np.ndarray, W: np.ndarray) -> np.ndarray:
+    """Continuous-time RNN derivative: dx/dt = -x + W @ tanh(x) + u."""
+    return -x + W @ np.tanh(x) + u
+
+
+# --------------------------------------------------------------------------- #
+# Step functions  (deterministic part + pre-scaled noise injected at end)
+# --------------------------------------------------------------------------- #
+def _euler_step(x: np.ndarray, u: np.ndarray, W: np.ndarray,
+                dt: float, noise: np.ndarray) -> np.ndarray:
+    """Euler-Maruyama step."""
+    return x + dt * _rhs(x, u, W) + noise
+
+
+def _heun_step(x: np.ndarray, u: np.ndarray, W: np.ndarray,
+               dt: float, noise: np.ndarray) -> np.ndarray:
+    """Heun (Improved Euler / trapezoidal) step with EM noise at end."""
+    k1 = _rhs(x, u, W)
+    x_pred = x + dt * k1
+    k2 = _rhs(x_pred, u, W)
+    return x + dt * 0.5 * (k1 + k2) + noise
+
+
+def _rk4_step(x: np.ndarray, u: np.ndarray, W: np.ndarray,
+              dt: float, noise: np.ndarray) -> np.ndarray:
+    """Classic 4th-order Runge-Kutta step with EM noise at end."""
+    k1 = _rhs(x,               u, W)
+    k2 = _rhs(x + 0.5*dt*k1,  u, W)
+    k3 = _rhs(x + 0.5*dt*k2,  u, W)
+    k4 = _rhs(x +      dt*k3, u, W)
+    return x + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4) + noise
+
+
+# Dispatch table: method name -> step function
+_STEP_FN = {
+    "euler": _euler_step,
+    "heun":  _heun_step,
+    "rk4":   _rk4_step,
+}
+
+
+# --------------------------------------------------------------------------- #
 # Engine
 # --------------------------------------------------------------------------- #
 class Simulator:
@@ -89,8 +136,17 @@ class Simulator:
                 f"n_neurons={n}."
             )
 
+        method = getattr(sim, "integration_method", "euler")
+        step_fn = _STEP_FN.get(method)
+        if step_fn is None:
+            raise ValueError(
+                f"Unknown integration_method '{method}'. "
+                f"Valid options: {list(_STEP_FN)}"
+            )
+
         rng = np.random.default_rng(config.network.random_seed)
         n_steps = sim.n_steps
+        sqrt_dt = np.sqrt(sim.dt)
 
         time = np.arange(n_steps) * sim.dt
         activity = np.zeros((n, n_steps))
@@ -99,9 +155,12 @@ class Simulator:
 
         for t in range(n_steps):
             activity[:, t] = x
-            drive = -x + weight_matrix @ np.tanh(x) + inputs[:, t]
-            noise = rng.normal(0.0, sim.noise_level, size=n) if sim.noise_level > 0 else 0.0
-            x = x + sim.dt * drive + noise
+            noise = (
+                rng.normal(0.0, sim.noise_level * sqrt_dt, size=n)
+                if sim.noise_level > 0
+                else np.zeros(n)
+            )
+            x = step_fn(x, inputs[:, t], weight_matrix, sim.dt, noise)
             x = np.clip(x, -self.CLIP, self.CLIP)
 
         metadata = {
@@ -112,6 +171,7 @@ class Simulator:
             "dt": sim.dt,
             "random_seed": config.network.random_seed,
             "input_type": sim.input_type,
+            "integration_method": method,
         }
 
         return SimulationResult(
