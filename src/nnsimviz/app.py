@@ -90,7 +90,7 @@ _PLOT_CONFIG = {
 # --------------------------------------------------------------------------- #
 # Sidebar controls -> ProjectConfig
 # --------------------------------------------------------------------------- #
-def read_config_from_sidebar() -> ProjectConfig:
+def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
     """Read every sidebar widget and assemble a ProjectConfig.
 
     Each widget carries a `help=` string, which Streamlit renders as a small
@@ -157,6 +157,11 @@ def read_config_from_sidebar() -> ProjectConfig:
         inter_module_probability=inter_module_probability,
     )
 
+    imported_weight_matrix = read_imported_weight_matrix_from_sidebar()
+
+    if imported_weight_matrix is not None:
+        network.n_neurons = int(imported_weight_matrix.shape[0])
+
     # ---- Simulation ----
     st.sidebar.header("Simulation")
     duration = st.sidebar.slider(
@@ -217,16 +222,76 @@ def read_config_from_sidebar() -> ProjectConfig:
         show_activity_on_nodes=show_activity_on_nodes,
     )
 
-    return ProjectConfig(network=network, simulation=simulation, visualization=visualization)
+    config = ProjectConfig(
+        network=network,
+        simulation=simulation,
+        visualization=visualization,
+    )
+
+    return config, imported_weight_matrix
+# --------------------------------------------------------------------------- #
+# Streamlit upload control
+# --------------------------------------------------------------------------- #
+def read_imported_weight_matrix_from_sidebar():
+    """Read optional imported weight matrix from the sidebar."""
+    st.sidebar.subheader("Import network")
+
+    use_imported = st.sidebar.checkbox(
+        "Use imported weight matrix",
+        value=False,
+        help=(
+            "Upload a square recurrent weight matrix W. "
+            "If enabled, this overrides the generated network model."
+        ),
+    )
+
+    if not use_imported:
+        return None
+
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload W",
+        type=["csv", "npy", "npz"],
+        help=(
+            "CSV, NPY, or NPZ file containing a square matrix. "
+            "Convention: W[i, j] is the connection from neuron j to neuron i."
+        ),
+    )
+
+    if uploaded_file is None:
+        st.sidebar.info("Upload a weight matrix to use import mode.")
+        return None
+
+    try:
+        W = io_utils.load_weight_matrix_from_upload(
+            uploaded_file.name,
+            uploaded_file.getvalue(),
+        )
+    except ValueError as exc:
+        st.sidebar.error(f"Could not import network: {exc}")
+        st.stop()
+
+    st.sidebar.success(f"Imported W with shape {W.shape[0]} x {W.shape[1]}")
+    return W
 
 
 # --------------------------------------------------------------------------- #
 # Pipeline (orchestration only)
 # --------------------------------------------------------------------------- #
-def run_pipeline(config: ProjectConfig):
-    """model -> simulation -> result. Returns the SimulationResult."""
-    weight_matrix = build_weight_matrix(config.network)
-    return Simulator().run(config, weight_matrix)
+def run_pipeline(config: ProjectConfig, imported_weight_matrix=None):
+    """model/import -> simulation -> result. Returns the SimulationResult."""
+    if imported_weight_matrix is None:
+        weight_matrix = build_weight_matrix(config.network)
+        result = Simulator().run(config, weight_matrix)
+        result.metadata["network_source"] = "generated"
+        return result
+
+    weight_matrix = io_utils.validate_weight_matrix(imported_weight_matrix)
+    config.network.n_neurons = weight_matrix.shape[0]
+
+    result = Simulator().run(config, weight_matrix)
+    result.metadata["network_source"] = "imported"
+    result.metadata["network_source_name"] = "Imported weight matrix"
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -239,7 +304,7 @@ def main() -> None:
         "as a graph. Blue = positive weight, red = negative, thickness = strength."
     )
 
-    config = read_config_from_sidebar()
+    config, imported_weight_matrix = read_config_from_sidebar()
 
     # Validate up front so the user gets a clear message, not a traceback.
     try:
@@ -250,7 +315,7 @@ def main() -> None:
 
     if st.sidebar.button("\u25b6 Run simulation", type="primary"):
         with st.spinner("Running simulation..."):
-            result = run_pipeline(config)
+            result = run_pipeline(config, imported_weight_matrix)
         st.session_state["result"] = result
 
     result = st.session_state.get("result")
@@ -258,7 +323,10 @@ def main() -> None:
         st.info("Set your parameters in the sidebar and press **Run simulation**.")
         return
 
-    model_name = MODEL_REGISTRY[result.config.network.model_type].name
+    model_name = result.metadata.get("network_source_name")
+
+    if model_name is None:
+        model_name = MODEL_REGISTRY[result.config.network.model_type].name
 
     # ---- three tabs: static graph, activity over time, animation ---- #
     tab_graph, tab_activity, tab_anim = st.tabs(

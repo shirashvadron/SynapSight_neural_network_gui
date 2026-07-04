@@ -2,6 +2,7 @@
 
 import numpy as np
 import plotly.graph_objects as go
+import io
 import pytest
 
 from nnsimviz.configs import (
@@ -85,6 +86,49 @@ class TestIO:
         # 1 header + one row per neuron
         assert len(lines) == result.activity.shape[0] + 1
 
+    def test_import_weight_matrix_from_csv(self):
+        data = b"0.0,1.0\n-2.0,0.0\n"
+        W = io_utils.load_weight_matrix_from_upload("weights.csv", data)
+        expected = np.array([
+            [0.0, 1.0],
+            [-2.0, 0.0],
+        ])
+        assert np.array_equal(W, expected)
+
+    def test_import_weight_matrix_from_npy(self):
+        original = np.array([
+            [0.0, 0.5],
+            [-0.2, 0.0],
+        ])
+        buf = io.BytesIO()
+        np.save(buf, original)
+        W = io_utils.load_weight_matrix_from_upload("weights.npy", buf.getvalue())
+        assert np.array_equal(W, original)
+
+    def test_import_weight_matrix_from_npz_with_W_key(self):
+        original = np.array([
+            [0.0, 0.5],
+            [-0.2, 0.0],
+        ])
+        buf = io.BytesIO()
+        np.savez(buf, W=original)
+        W = io_utils.load_weight_matrix_from_upload("weights.npz", buf.getvalue())
+        assert np.array_equal(W, original)
+
+    def test_import_weight_matrix_rejects_non_square_matrix(self):
+        data = b"1.0,2.0,3.0\n4.0,5.0,6.0\n"
+        with pytest.raises(ValueError, match="square"):
+            io_utils.load_weight_matrix_from_upload("bad.csv", data)
+
+    def test_import_weight_matrix_rejects_nan_values(self):
+        data = b"0.0,nan\n1.0,0.0\n"
+        with pytest.raises(ValueError, match="finite"):
+            io_utils.load_weight_matrix_from_upload("bad.csv", data)
+
+    def test_import_weight_matrix_rejects_unsupported_format(self):
+        with pytest.raises(ValueError, match="Unsupported"):
+            io_utils.load_weight_matrix_from_upload("weights.txt", b"0,1\n1,0")
+
 
 class TestIntegration:
     def test_full_pipeline_runs_end_to_end(self):
@@ -109,6 +153,31 @@ class TestIntegration:
         for field in ("time", "activity", "final_state",
                       "weight_matrix", "config", "metadata"):
             assert hasattr(result, field)
+
+    def test_imported_weight_matrix_runs_end_to_end(self):
+        W = np.array([
+            [0.0, 0.7, 0.0],
+            [-0.3, 0.0, 0.2],
+            [0.1, 0.0, 0.0],
+        ])
+        cfg = ProjectConfig(
+            network=NetworkConfig(n_neurons=W.shape[0]),
+            simulation=SimulationConfig(
+                duration=2.0,
+                dt=0.1,
+                input_type="constant",
+                noise_level=0.0,
+            ),
+            visualization=VisualizationConfig(layout_type="circular"),
+        )
+        result = Simulator().run(cfg, io_utils.validate_weight_matrix(W))
+        result.metadata["network_source"] = "imported"
+        result.metadata["network_source_name"] = "Imported weight matrix"
+        fig = build_figure(result)
+        assert isinstance(fig, go.Figure)
+        assert result.weight_matrix.shape == (3, 3)
+        assert np.array_equal(result.weight_matrix, W)
+        assert np.isfinite(result.activity).all()
 
 
 if __name__ == "__main__":
