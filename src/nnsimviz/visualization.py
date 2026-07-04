@@ -58,7 +58,10 @@ class EdgeData:
 
 
 def _model_display_name(result: SimulationResult) -> str:
-    """Human-readable model name from the registry, for figure titles."""
+    """Human-readable model/source name for figure titles."""
+    if result.metadata.get("network_source") == "imported":
+        return result.metadata.get("network_source_name", "Imported network")
+
     key = result.config.network.model_type
     model = MODEL_REGISTRY.get(key)
     return model.name if model is not None else key
