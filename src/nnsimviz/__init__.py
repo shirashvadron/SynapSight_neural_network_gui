@@ -36,6 +36,17 @@ from .simulation import Simulator, SimulationResult
 from .visualization import NetworkVisualizer, build_figure
 from .event_simulation import EventBasedSimulator
 from .pipeline import run_pipeline
+from .motifs import (
+    MotifType,
+    MotifConfig,
+    MotifTemplate,
+    MotifInstance,
+    add_motifs,
+    build_network_with_motifs,
+    get_template,
+    MOTIF_LABELS,
+    MOTIF_SIZES,
+)
 
 __version__ = "0.1.0"
 
@@ -59,5 +70,14 @@ __all__ = [
     "EventSimulationConfig",
     "EventBasedSimulator",
     "run_pipeline",
+    "MotifType",
+    "MotifConfig",
+    "MotifTemplate",
+    "MotifInstance",
+    "add_motifs",
+    "build_network_with_motifs",
+    "get_template",
+    "MOTIF_LABELS",
+    "MOTIF_SIZES",
     "__version__",
 ]

@@ -13,6 +13,7 @@ from . import io_utils
 from .configs import ProjectConfig
 from .event_simulation import EventBasedSimulator
 from .models import build_weight_matrix
+from .motifs import build_network_with_motifs
 from .simulation import Simulator, SimulationResult
 
 
@@ -31,6 +32,14 @@ def run_pipeline(
         network_source = "imported"
         network_source_name = "Imported weight matrix"
 
+    # Apply motifs (no-op when disabled). They expand the weight matrix with
+    # extra neurons before simulation, so they work for both the continuous
+    # and event-based engines. n_neurons is grown to match.
+    weight_matrix, motif_meta = build_network_with_motifs(
+        weight_matrix, config.motifs
+    )
+    config.network.n_neurons = weight_matrix.shape[0]
+
     if config.simulation.simulation_type == "event_based":
         result = EventBasedSimulator().run(config, weight_matrix)
     else:
@@ -39,4 +48,5 @@ def run_pipeline(
     result.metadata["network_source"] = network_source
     if network_source_name is not None:
         result.metadata["network_source_name"] = network_source_name
+    result.metadata["motifs"] = motif_meta["motifs"]
     return result

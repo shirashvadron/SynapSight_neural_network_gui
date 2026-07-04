@@ -39,6 +39,30 @@ from .simulation import SimulationResult
 
 POSITIVE_COLOR = "#1f77b4"  # blue
 NEGATIVE_COLOR = "#d62728"  # red
+MOTIF_POSITIVE_COLOR = "#2ca02c"  # green (motif excitatory)
+MOTIF_NEGATIVE_COLOR = "#d62728"  # red   (motif inhibitory)
+MOTIF_RING_COLOR = "#2ca02c"      # default green ring (fallback)
+
+# Distinct ring color per motif type, so different motifs are told apart at a
+# glance. Keys are the motif_type string values used in the metadata.
+MOTIF_TYPE_COLORS: dict[str, str] = {
+    "coincidence_detector": "#2ca02c",     # green
+    "lateral_inhibition": "#9467bd",       # purple
+    "negative_feedback_loop": "#ff7f0e",   # orange
+    "feedforward_loop": "#17becf",         # cyan
+    "feedforward_inhibition": "#e377c2",   # pink
+    "mutual_excitation": "#bcbd22",        # olive
+}
+
+# Readable labels for the motif legend.
+MOTIF_TYPE_LABELS: dict[str, str] = {
+    "coincidence_detector": "Coincidence detector",
+    "lateral_inhibition": "Lateral inhibition",
+    "negative_feedback_loop": "Negative feedback loop",
+    "feedforward_loop": "Feedforward loop",
+    "feedforward_inhibition": "Feedforward inhibition",
+    "mutual_excitation": "Mutual excitation",
+}
 _N_WIDTH_BUCKETS = 5         # discrete line-width levels per sign
 
 # Layouts offered by the visualizer. The GUI reads this list so the two
@@ -222,7 +246,10 @@ class NetworkVisualizer:
         node_trace = self._node_trace(graph, pos, result)
         legend_traces = self._legend_traces()
 
-        fig = go.Figure(data=[*edge_traces, node_trace, *legend_traces])
+        motif_meta = result.metadata.get("motifs", [])
+        motif_traces = self._motif_traces(motif_meta, pos)
+
+        fig = go.Figure(data=[*edge_traces, *motif_traces, node_trace, *legend_traces])
         title = f"Neural Network Graph \u2014 {_model_display_name(result)}"
         fig.update_layout(
             showlegend=True,
@@ -323,6 +350,12 @@ class NetworkVisualizer:
             for name, s in zip(frame_names, frame_idx)
         ]
 
+        # Motif marking overlay (static): type-colored rings + green/red motif
+        # edges. Appended AFTER the node marker so the marker stays at index
+        # len(edge_traces) -- the trace the animation frames update.
+        motif_meta = result.metadata.get("motifs", [])
+        motif_traces = self._motif_traces(motif_meta, pos)
+
         # Base frame duration in ms at 1x speed; halved/doubled for 2x/0.5x.
         base_ms = 120
         speeds = [("0.5x", base_ms * 2), ("1x", base_ms), ("2x", base_ms // 2)]
@@ -350,7 +383,7 @@ class NetworkVisualizer:
             for name, s in zip(frame_names, frame_idx)
         ]
 
-        fig = go.Figure(data=[*edge_traces, first], frames=frames)
+        fig = go.Figure(data=[*edge_traces, first, *motif_traces], frames=frames)
         fig.update_layout(
             title=dict(text=f"Activity animation \u2014 {_model_display_name(result)}",
                        x=0.5, xanchor="center"),
@@ -673,6 +706,84 @@ class NetworkVisualizer:
             textfont=dict(size=9, color="white"),
             hovertext=hover, hoverinfo="text", showlegend=False,
         )
+
+    def _motif_traces(self, motif_meta: list[dict],
+                      pos: dict[int, tuple[float, float]]) -> list[go.Scatter]:
+        """Build highlight traces for motif nodes and edges from metadata.
+
+        Uses the motif metadata directly (node/edge indices and signs) rather
+        than trying to rediscover motifs from the weight matrix. Motif edges
+        are emphasized in green (positive) or red (negative). Motif nodes get
+        a ring whose color identifies the motif TYPE, with one legend entry
+        per type actually present. Returns an empty list when there are no
+        motifs.
+        """
+        if not motif_meta:
+            return []
+
+        traces: list[go.Scatter] = []
+
+        # 1. Emphasized motif edges, split by sign for color.
+        for want_positive, color in ((True, MOTIF_POSITIVE_COLOR),
+                                     (False, MOTIF_NEGATIVE_COLOR)):
+            xs: list[float | None] = []
+            ys: list[float | None] = []
+            for motif in motif_meta:
+                signs = motif.get("node_signs", {})
+                for src, tgt in motif.get("edges", []):
+                    # An edge is "positive" if its source node is excitatory.
+                    src_sign = signs.get(src) or signs.get(str(src)) or "positive"
+                    is_pos = src_sign == "positive"
+                    if is_pos != want_positive:
+                        continue
+                    if src not in pos or tgt not in pos:
+                        continue
+                    x0, y0 = pos[src]
+                    x1, y1 = pos[tgt]
+                    xs += [x0, x1, None]
+                    ys += [y0, y1, None]
+            if xs:
+                traces.append(go.Scatter(
+                    x=xs, y=ys, mode="lines",
+                    line=dict(color=color, width=3.5),
+                    hoverinfo="none", showlegend=False, opacity=0.9,
+                ))
+
+        # 2. Rings around motif nodes, colored by motif type. One marker
+        #    trace per type keeps colors grouped and hover text meaningful.
+        by_type: dict[str, list[int]] = {}
+        for motif in motif_meta:
+            mtype = motif.get("motif_type", "motif")
+            by_type.setdefault(mtype, []).extend(motif.get("nodes", []))
+
+        for mtype, nodes in by_type.items():
+            ring_color = MOTIF_TYPE_COLORS.get(mtype, MOTIF_RING_COLOR)
+            label = MOTIF_TYPE_LABELS.get(mtype, mtype)
+            rx = [pos[n][0] for n in nodes if n in pos]
+            ry = [pos[n][1] for n in nodes if n in pos]
+            hover = [f"{label}<br>neuron {n}" for n in nodes if n in pos]
+            if not rx:
+                continue
+            traces.append(go.Scatter(
+                x=rx, y=ry, mode="markers",
+                marker=dict(size=22, color="rgba(0,0,0,0)",
+                            line=dict(color=ring_color, width=3)),
+                hovertext=hover, hoverinfo="text",
+                name=label, showlegend=True,
+            ))
+
+        # 3. Legend entries for the edge sign encoding (shared by all motifs).
+        traces.append(go.Scatter(
+            x=[None], y=[None], mode="lines",
+            line=dict(color=MOTIF_POSITIVE_COLOR, width=3.5),
+            name="motif excitatory (+)",
+        ))
+        traces.append(go.Scatter(
+            x=[None], y=[None], mode="lines",
+            line=dict(color=MOTIF_NEGATIVE_COLOR, width=3.5),
+            name="motif inhibitory (\u2212)",
+        ))
+        return traces
 
     def _legend_traces(self) -> list[go.Scatter]:
         """Invisible traces that produce a clean legend for edge colors."""

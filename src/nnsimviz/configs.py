@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
+from .motifs import MotifConfig
+
 
 # --------------------------------------------------------------------------- #
 # Network
@@ -217,12 +219,14 @@ class ProjectConfig:
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     event: EventSimulationConfig = field(default_factory=EventSimulationConfig)
+    motifs: MotifConfig = field(default_factory=MotifConfig)
 
     def validate(self) -> None:
         """Validate all sub-configs."""
         self.network.validate()
         self.simulation.validate()
         self.visualization.validate()
+        self.motifs.validate()
         if self.simulation.simulation_type == "event_based":
             self.event.validate()
             if self.event.default_input_neuron >= self.network.n_neurons:
@@ -249,4 +253,5 @@ class ProjectConfig:
             simulation=SimulationConfig(**data.get("simulation", {})),
             visualization=VisualizationConfig(**data.get("visualization", {})),
             event=EventSimulationConfig(**event_data),
+            motifs=MotifConfig(**data.get("motifs", {})),
         )
