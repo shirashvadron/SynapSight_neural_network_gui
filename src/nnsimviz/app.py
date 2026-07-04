@@ -27,6 +27,7 @@ from nnsimviz.visualization import (
     build_figure,
     build_activity_figure,
     build_animated_figure,
+    build_pca_animation_figure,
     NetworkVisualizer,
     AVAILABLE_LAYOUTS,
 )
@@ -358,9 +359,9 @@ def main() -> None:
     if model_name is None:
         model_name = MODEL_REGISTRY[result.config.network.model_type].name
 
-    # ---- three tabs: static graph, activity over time, animation ---- #
-    tab_graph, tab_activity, tab_anim = st.tabs(
-        ["Network graph", "Activity over time", "Animation"]
+    # ---- four tabs: static graph, activity over time, animation, PCA ---- #
+    tab_graph, tab_activity, tab_anim, tab_pca = st.tabs(
+        ["Network graph", "Activity over time", "Animation", "Animated PCA"]
     )
 
     with tab_graph:
@@ -391,6 +392,18 @@ def main() -> None:
         st.caption("Press \u25b6 Play to watch node activity evolve over time.")
         anim_fig = build_animated_figure(result)
         st.plotly_chart(anim_fig, use_container_width=True, config=_PLOT_CONFIG)
+
+    with tab_pca:
+        st.subheader("Animated PCA \u2014 state-space trajectory")
+        st.caption(
+            "The network\u2019s N-dimensional activity vector is projected onto its "
+            "first two principal components. The moving dot traces the collective "
+            "state through PC-space over time. "
+            "\U0001f7e2 Green stars = stable fixed points \u00b7 "
+            "\U0001f7e0 Orange diamonds = unstable fixed points."
+        )
+        pca_fig = build_pca_animation_figure(result)
+        st.plotly_chart(pca_fig, use_container_width=True, config=_PLOT_CONFIG)
 
     # ---- summary ----
     _, edges = NetworkVisualizer(

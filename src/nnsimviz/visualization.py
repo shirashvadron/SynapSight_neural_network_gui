@@ -20,6 +20,8 @@ This module also provides:
   * the model name shown as the figure title;
   * an activity-over-time line figure;
   * an animated version of the network graph (nodes pulse with activity);
+  * an animated PCA projection of network state-space dynamics, with
+    fixed-point markers overlaid (new: build_pca_animation_figure);
   * a static-image (PNG) export helper.
 """
 
@@ -70,6 +72,98 @@ def _model_display_name(result: SimulationResult) -> str:
 def result_time_label(result: SimulationResult, step: int) -> str:
     """Short label for a time step, showing the actual simulated time."""
     return f"{result.time[step]:.2f}"
+
+
+# --------------------------------------------------------------------------- #
+# PCA helpers
+# --------------------------------------------------------------------------- #
+
+def _compute_pca_projection(activity: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Project (n_neurons, n_steps) activity matrix onto its first 2 PCs.
+
+    Returns
+    -------
+    coords   : (n_steps, 2)  PC coordinates for every time step
+    components : (2, n_neurons)  the two principal directions
+    explained  : (2,)  fraction of variance explained by each PC
+    """
+    # centre across neurons (each neuron zero-mean over time)
+    X = activity - activity.mean(axis=1, keepdims=True)   # (n, T)
+    # SVD of the transposed matrix -> (T, n) so rows are observations
+    U, s, Vt = np.linalg.svd(X.T, full_matrices=False)    # U:(T,k), s:(k,), Vt:(k,n)
+    total_var = (s ** 2).sum() or 1.0
+    coords = U * s                                          # (T, k)  projected scores
+    explained = (s[:2] ** 2) / total_var
+    return coords[:, :2], Vt[:2], explained
+
+
+def _find_fixed_points_pca(
+    weight_matrix: np.ndarray,
+    activity: np.ndarray,
+    components: np.ndarray,
+    n_candidates: int = 8,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Estimate fixed points and project them into PCA space.
+
+    Strategy
+    --------
+    We take several candidate states from the activity trajectory (evenly
+    spaced), then refine each one via a short fixed-point iteration:
+        x <- tanh-inverse of the effective drive  (Newton-like relaxation)
+    In practice we use a simple gradient-descent relaxation:
+        x <- x - alpha * (-x + W @ tanh(x))
+    until convergence, which is fast for well-conditioned networks.
+
+    Each converged point is then classified as stable or unstable by the
+    spectral radius of its Jacobian  J = -I + W * diag(sech²(x*)).
+    If all eigenvalues of J have Re < 0 the point is stable; otherwise unstable.
+
+    Returns
+    -------
+    fp_pca    : (m, 2)  unique fixed points in PC space
+    stability : (m,)  bool array, True = stable
+    """
+    n, T = activity.shape
+    W = weight_matrix
+    alpha = 0.05
+    max_iter = 400
+    tol = 1e-6
+
+    # Candidate starting points: evenly sampled from trajectory.
+    cand_indices = np.linspace(0, T - 1, n_candidates, dtype=int)
+    candidates = [activity[:, i].copy() for i in cand_indices]
+
+    fps_raw: list[np.ndarray] = []
+    stabilities: list[bool] = []
+
+    for x0 in candidates:
+        x = x0.copy()
+        for _ in range(max_iter):
+            dx = -x + W @ np.tanh(x)
+            x = x + alpha * dx
+            if np.linalg.norm(dx) < tol:
+                break
+        # Deduplicate: skip if too close to an existing fixed point.
+        is_dup = any(np.linalg.norm(x - fp) < 0.1 for fp in fps_raw)
+        if not is_dup:
+            fps_raw.append(x.copy())
+            # Stability: Jacobian eigenvalues.
+            sech2 = 1.0 / (np.cosh(x) ** 2)          # (n,)
+            J = -np.eye(n) + W * sech2[np.newaxis, :]  # (n, n)
+            eigvals = np.linalg.eigvals(J)
+            stable = bool(np.all(eigvals.real < 0))
+            stabilities.append(stable)
+
+    if not fps_raw:
+        return np.empty((0, 2)), np.empty(0, dtype=bool)
+
+    # Project fixed points into PCA space using the same components.
+    X_mean = activity.mean(axis=1)                         # (n,)
+    fp_matrix = np.array(fps_raw)                          # (m, n)
+    fp_centred = fp_matrix - X_mean[np.newaxis, :]         # (m, n)
+    fp_pca = fp_centred @ components.T                     # (m, 2)
+
+    return fp_pca, np.array(stabilities)
 
 
 class NetworkVisualizer:
@@ -278,6 +372,229 @@ class NetworkVisualizer:
         )
         return fig
 
+    # ---- animated PCA projection ------------------------------------------ #
+    def create_pca_animated_figure(
+        self,
+        result: SimulationResult,
+        max_frames: int = 60,
+        n_fp_candidates: int = 10,
+    ) -> go.Figure:
+        """Animated PCA projection of the network's state-space trajectory.
+
+        What this shows
+        ---------------
+        The network's full N-dimensional activity vector is projected onto
+        its first two principal components (PCs), computed from the entire
+        simulation run. Each animation frame moves a marker along this
+        2-D trajectory, revealing how the network's collective state
+        travels through its dominant subspace over time.
+
+        Fixed points are overlaid as larger background markers:
+          * Green star  = stable fixed point  (all Jacobian eigenvalues Re < 0)
+          * Orange diamond = unstable fixed point (at least one Re \u2265 0)
+
+        Fixed points are found by relaxing a set of candidate states sampled
+        from the trajectory, then projecting the converged points into the
+        same PC space.
+
+        Controls
+        --------
+        Same Play/Pause/speed (0.5x, 1x, 2x) buttons and scrub-slider as
+        the existing Animation tab.
+        """
+        activity = result.activity                            # (n, T)
+        n_steps = activity.shape[1]
+
+        # Evenly sample frames.
+        if n_steps <= max_frames:
+            frame_idx = list(range(n_steps))
+        else:
+            frame_idx = list(np.linspace(0, n_steps - 1, max_frames, dtype=int))
+
+        # ---------- PCA ------------------------------------------------------ #
+        coords, components, explained = _compute_pca_projection(activity)
+        # coords: (T, 2), full trajectory
+
+        pc1_label = f"PC1 ({explained[0] * 100:.1f}% var)"
+        pc2_label = f"PC2 ({explained[1] * 100:.1f}% var)"
+
+        # ---------- fixed points --------------------------------------------- #
+        fp_pca, fp_stable = _find_fixed_points_pca(
+            result.weight_matrix, activity, components,
+            n_candidates=n_fp_candidates,
+        )
+
+        # ---------- full ghost trajectory trace (static background) ---------- #
+        ghost_trace = go.Scatter(
+            x=coords[:, 0].tolist(),
+            y=coords[:, 1].tolist(),
+            mode="lines",
+            line=dict(color="#cccccc", width=1.5),
+            name="Full trajectory",
+            hoverinfo="skip",
+            showlegend=True,
+        )
+
+        # ---------- fixed point traces (static background) ------------------- #
+        fp_traces: list[go.Scatter] = []
+        if fp_pca.shape[0] > 0:
+            stable_mask = fp_stable
+            unstable_mask = ~fp_stable
+
+            if stable_mask.any():
+                fp_traces.append(go.Scatter(
+                    x=fp_pca[stable_mask, 0].tolist(),
+                    y=fp_pca[stable_mask, 1].tolist(),
+                    mode="markers",
+                    marker=dict(
+                        symbol="star", size=18,
+                        color="#2ca02c",          # green
+                        line=dict(width=1.5, color="#1a7a1a"),
+                    ),
+                    name="Stable fixed point",
+                    hovertemplate="Stable FP<br>PC1=%{x:.3f}<br>PC2=%{y:.3f}<extra></extra>",
+                ))
+
+            if unstable_mask.any():
+                fp_traces.append(go.Scatter(
+                    x=fp_pca[unstable_mask, 0].tolist(),
+                    y=fp_pca[unstable_mask, 1].tolist(),
+                    mode="markers",
+                    marker=dict(
+                        symbol="diamond", size=14,
+                        color="#ff7f0e",          # orange
+                        line=dict(width=1.5, color="#b35900"),
+                    ),
+                    name="Unstable fixed point",
+                    hovertemplate="Unstable FP<br>PC1=%{x:.3f}<br>PC2=%{y:.3f}<extra></extra>",
+                ))
+
+        # ---------- color-encode time along the trajectory ------------------- #
+        # Use a sequential colorscale so the moving dot inherits the frame's
+        # normalized time position.
+        n_frames = len(frame_idx)
+        color_vals = list(range(n_frames))    # 0 .. n_frames-1 for colorscale
+
+        def _moving_dot(fi: int) -> go.Scatter:
+            """Scatter trace for the animated state-dot at frame index fi."""
+            step = frame_idx[fi]
+            x_val = float(coords[step, 0])
+            y_val = float(coords[step, 1])
+            t_val = float(result.time[step])
+            return go.Scatter(
+                x=[x_val],
+                y=[y_val],
+                mode="markers",
+                marker=dict(
+                    size=16,
+                    color=[color_vals[fi]],
+                    colorscale="Plasma",
+                    cmin=0, cmax=n_frames - 1,
+                    showscale=True,
+                    colorbar=dict(
+                        title="frame",
+                        thickness=12,
+                        len=0.6,
+                        tickvals=[0, (n_frames - 1) // 2, n_frames - 1],
+                        ticktext=["start", "mid", "end"],
+                    ),
+                    line=dict(width=2, color="white"),
+                    symbol="circle",
+                ),
+                name=f"State (t={t_val:.2f})",
+                hovertemplate=(
+                    f"t = {t_val:.3f}<br>"
+                    "PC1 = %{x:.3f}<br>PC2 = %{y:.3f}<extra></extra>"
+                ),
+                showlegend=False,
+            )
+
+        # Static traces: ghost + fixed points; animated trace is appended last.
+        static_traces = [ghost_trace, *fp_traces]
+        anim_trace_idx = len(static_traces)   # index of the animated dot trace
+
+        first_dot = _moving_dot(0)
+        frames = [
+            go.Frame(
+                name=str(int(frame_idx[fi])),
+                data=[_moving_dot(fi)],
+                traces=[anim_trace_idx],
+            )
+            for fi in range(n_frames)
+        ]
+
+        # ---------- media controls ------------------------------------------- #
+        base_ms = 100
+        speeds = [("0.5x", base_ms * 2), ("1x", base_ms), ("2x", base_ms // 2)]
+        play_buttons = [
+            dict(
+                label=f"\u25b6 {label}", method="animate",
+                args=[None, dict(
+                    frame=dict(duration=ms, redraw=True),
+                    transition=dict(duration=0),
+                    fromcurrent=True, mode="immediate",
+                )],
+            )
+            for label, ms in speeds
+        ]
+        pause_button = dict(
+            label="\u23f8 Pause", method="animate",
+            args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")],
+        )
+
+        frame_names = [str(int(s)) for s in frame_idx]
+        slider_steps = [
+            dict(
+                label=result_time_label(result, int(s)),
+                method="animate",
+                args=[[name], dict(
+                    frame=dict(duration=0, redraw=True),
+                    mode="immediate",
+                    transition=dict(duration=0),
+                )],
+            )
+            for name, s in zip(frame_names, frame_idx)
+        ]
+
+        # ---------- assemble figure ------------------------------------------ #
+        fig = go.Figure(
+            data=[*static_traces, first_dot],
+            frames=frames,
+        )
+        fig.update_layout(
+            title=dict(
+                text=(
+                    f"PCA state-space trajectory \u2014 {_model_display_name(result)}"
+                ),
+                x=0.5, xanchor="center",
+            ),
+            xaxis=dict(
+                title=pc1_label,
+                showgrid=True, gridcolor="#eee", zeroline=True, zerolinecolor="#ccc",
+            ),
+            yaxis=dict(
+                title=pc2_label,
+                showgrid=True, gridcolor="#eee", zeroline=True, zerolinecolor="#ccc",
+            ),
+            plot_bgcolor="white",
+            margin=dict(b=20, l=60, r=20, t=90),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="closest",
+            updatemenus=[dict(
+                type="buttons", showactive=False, direction="left",
+                x=0.0, xanchor="left", y=1.12, yanchor="top", pad=dict(r=6, t=0),
+                buttons=[*play_buttons, pause_button],
+            )],
+            sliders=[dict(
+                active=0,
+                currentvalue=dict(prefix="t = ", visible=True, xanchor="right"),
+                pad=dict(t=40, b=0),
+                x=0.0, len=1.0,
+                steps=slider_steps,
+            )],
+        )
+        return fig
+
     # ---- helpers ---------------------------------------------------------- #
     def _edge_traces(self, edges: list[EdgeData],
                      pos: dict[int, tuple[float, float]]) -> list[go.Scatter]:
@@ -385,6 +702,19 @@ def build_animated_figure(result: SimulationResult) -> go.Figure:
     """Convenience entry point: result -> animated network figure."""
     visualizer = NetworkVisualizer(result.config.visualization)
     return visualizer.create_animated_figure(result)
+
+
+def build_pca_animation_figure(result: SimulationResult) -> go.Figure:
+    """Convenience entry point: result -> animated PCA state-space figure.
+
+    Projects the full activity trajectory onto its first two principal
+    components and animates the network state moving through that 2-D
+    subspace. Fixed points (stable/unstable) are overlaid as background
+    markers so you can see where the trajectory is attracted to or repelled
+    from.
+    """
+    visualizer = NetworkVisualizer(result.config.visualization)
+    return visualizer.create_pca_animated_figure(result)
 
 
 def figure_to_png_bytes(fig: go.Figure, scale: float = 2.0) -> bytes:
