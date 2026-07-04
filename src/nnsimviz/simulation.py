@@ -139,7 +139,7 @@ class Simulator:
                 f"n_neurons={n}."
             )
 
-        method = getattr(sim, "integration_method", "euler")
+        method = sim.integration_method
         step_fn = _STEP_FN.get(method)
         if step_fn is None:
             raise ValueError(
@@ -150,11 +150,15 @@ class Simulator:
         rng = np.random.default_rng(config.network.random_seed)
         n_steps = sim.n_steps
         sqrt_dt = np.sqrt(sim.dt)
+        eps = sim.convergence_eps
 
         time = np.arange(n_steps) * sim.dt
         activity = np.zeros((n, n_steps))
         x = rng.normal(0.0, 0.1, size=n)  # small random initial state
         inputs = _build_input(sim, n, n_steps, rng)
+
+        converged_at: int | None = None
+        x_prev = x.copy()
 
         for t in range(n_steps):
             activity[:, t] = x
@@ -166,6 +170,15 @@ class Simulator:
             x = step_fn(x, inputs[:, t], weight_matrix, sim.dt, noise)
             x = np.clip(x, -self.CLIP, self.CLIP)
 
+            if eps is not None and t > 0 and np.max(np.abs(x - x_prev)) < eps:
+                converged_at = t
+                # fill remaining columns with the settled state
+                for remaining in range(t + 1, n_steps):
+                    activity[:, remaining] = x
+                break
+
+            x_prev = x.copy()
+
         metadata = {
             "model_type": config.network.model_type,
             "n_neurons": n,
@@ -175,6 +188,7 @@ class Simulator:
             "random_seed": config.network.random_seed,
             "input_type": sim.input_type,
             "integration_method": method,
+            "converged_at": converged_at,
         }
 
         return SimulationResult(

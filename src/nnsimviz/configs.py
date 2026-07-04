@@ -63,6 +63,9 @@ class NetworkConfig:
 # --------------------------------------------------------------------------- #
 # Simulation
 # --------------------------------------------------------------------------- #
+VALID_INTEGRATION_METHODS = ("euler", "heun", "rk4")
+
+
 @dataclass
 class SimulationConfig:
     """Parameters that control the forward-in-time network dynamics.
@@ -73,6 +76,11 @@ class SimulationConfig:
         input_type: One of {"none", "constant", "noise", "sine"}.
         input_amplitude: Amplitude of the external input signal.
         noise_level: Standard deviation of additive Gaussian process noise.
+        integration_method: One of VALID_INTEGRATION_METHODS. Selects the
+            numerical integrator used by Simulator.run.
+        convergence_eps: Optional early-exit threshold. When set, the loop
+            stops as soon as max|x[t] - x[t-1]| < convergence_eps and fills
+            the remaining columns with the converged state. Must be > 0.
     """
 
     duration: float = 10.0
@@ -80,6 +88,8 @@ class SimulationConfig:
     input_type: str = "constant"
     input_amplitude: float = 1.0
     noise_level: float = 0.05
+    integration_method: str = "euler"
+    convergence_eps: float | None = None
 
     VALID_INPUT_TYPES = ("none", "constant", "noise", "sine")
 
@@ -97,6 +107,12 @@ class SimulationConfig:
             )
         if self.noise_level < 0:
             raise ValueError("noise_level must be non-negative.")
+        if self.integration_method not in VALID_INTEGRATION_METHODS:
+            raise ValueError(
+                f"integration_method must be one of {VALID_INTEGRATION_METHODS}."
+            )
+        if self.convergence_eps is not None and self.convergence_eps <= 0:
+            raise ValueError("convergence_eps must be positive when set.")
 
     @property
     def n_steps(self) -> int:
