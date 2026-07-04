@@ -127,7 +127,7 @@ class VisualizationConfig:
     node_size_scale: float = 1.0
     show_activity_on_nodes: bool = True
 
-    VALID_LAYOUTS = ("spring", "circular")
+    VALID_LAYOUTS = ("spring", "circular", "shell", "spiral", "random")
 
     def validate(self) -> None:
         """Raise ValueError if any field is out of its valid range."""
