@@ -64,7 +64,7 @@ class NetworkConfig:
 # Simulation
 # --------------------------------------------------------------------------- #
 VALID_INTEGRATION_METHODS = ("euler", "heun", "rk4")
-
+VALID_SIMULATION_TYPES = ("continuous", "event_based")
 
 @dataclass
 class SimulationConfig:
@@ -90,10 +90,15 @@ class SimulationConfig:
     noise_level: float = 0.05
     integration_method: str = "euler"
     convergence_eps: float | None = None
+    simulation_type: str = "continuous"
 
     VALID_INPUT_TYPES = ("none", "constant", "noise", "sine")
 
     def validate(self) -> None:
+        if self.simulation_type not in VALID_SIMULATION_TYPES:
+            raise ValueError(
+                f"simulation_type must be one of {VALID_SIMULATION_TYPES}."
+            )
         """Raise ValueError if any field is out of its valid range."""
         if self.duration <= 0:
             raise ValueError("duration must be positive.")
@@ -118,6 +123,46 @@ class SimulationConfig:
     def n_steps(self) -> int:
         """Number of time steps in the simulation."""
         return int(round(self.duration / self.dt))
+
+
+@dataclass
+class EventSimulationConfig:
+    """Parameters for the event-based/spike-like simulator.
+
+    external_events are triples of (step, target_neuron, value). A positive
+    value excites the target; a negative value inhibits it. If no external
+    events are supplied, one default event is injected at step 0.
+    """
+
+    max_steps: int = 20
+    threshold: float = 1.0
+    reset_value: float = 0.0
+    decay: float = 0.0
+    default_input_neuron: int = 0
+    default_input_value: float = 1.0
+    external_events: list[tuple[int, int, float]] = field(default_factory=list)
+
+    def validate(self) -> None:
+        """Raise ValueError if event-simulation parameters are invalid."""
+        if self.max_steps <= 0:
+            raise ValueError("event max_steps must be positive.")
+        if self.threshold <= 0:
+            raise ValueError("event threshold must be positive.")
+        if not 0.0 <= self.decay <= 1.0:
+            raise ValueError("event decay must be in [0, 1].")
+        if self.default_input_neuron < 0:
+            raise ValueError("default_input_neuron must be non-negative.")
+
+        for event in self.external_events:
+            if len(event) != 3:
+                raise ValueError("Each external event must be (step, neuron, value).")
+            step, neuron, value = event
+            if int(step) < 0:
+                raise ValueError("External event step must be non-negative.")
+            if int(neuron) < 0:
+                raise ValueError("External event neuron index must be non-negative.")
+            if not isinstance(value, (int, float)):
+                raise ValueError("External event value must be numeric.")
 
 
 # --------------------------------------------------------------------------- #
@@ -171,13 +216,21 @@ class ProjectConfig:
     network: NetworkConfig = field(default_factory=NetworkConfig)
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
+    event: EventSimulationConfig = field(default_factory=EventSimulationConfig)
 
     def validate(self) -> None:
         """Validate all sub-configs."""
         self.network.validate()
         self.simulation.validate()
         self.visualization.validate()
-
+        if self.simulation.simulation_type == "event_based":
+            self.event.validate()
+            if self.event.default_input_neuron >= self.network.n_neurons:
+                raise ValueError("default_input_neuron is outside the network.")
+            for _, neuron, _ in self.event.external_events:
+                if int(neuron) >= self.network.n_neurons:
+                    raise ValueError("External event neuron index is outside the network.")
+    
     def to_dict(self) -> dict[str, Any]:
         """Return a nested plain-dict representation (JSON-serializable)."""
         return asdict(self)
@@ -185,8 +238,15 @@ class ProjectConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectConfig":
         """Rebuild a ProjectConfig from a nested dict (e.g. loaded JSON)."""
+        event_data = dict(data.get("event", {}))
+        if "external_events" in event_data:
+            event_data["external_events"] = [
+                tuple(event) for event in event_data["external_events"]
+            ]
+
         return cls(
             network=NetworkConfig(**data.get("network", {})),
             simulation=SimulationConfig(**data.get("simulation", {})),
             visualization=VisualizationConfig(**data.get("visualization", {})),
+            event=EventSimulationConfig(**event_data),
         )
