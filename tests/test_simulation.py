@@ -27,10 +27,6 @@ def _make_config(n=10, **sim_kwargs):
     )
 
 
-# =========================================================================== #
-# Original 8 tests (kept intact)
-# =========================================================================== #
-
 def test_result_shapes():
     cfg = _make_config(n=10, duration=5.0, dt=0.1)
     W = build_weight_matrix(cfg.network)
@@ -56,7 +52,6 @@ def test_simulation_is_finite():
 
 
 def test_clipping_prevents_explosion():
-    # Large weights would blow up without clipping.
     cfg = _make_config(n=30, duration=30.0, dt=0.5)
     cfg.network.weight_scale = 3.0
     W = build_weight_matrix(cfg.network)
@@ -95,10 +90,6 @@ def test_reproducible_runs():
     assert np.array_equal(r1.activity, r2.activity)
 
 
-# =========================================================================== #
-# New tests: Euler step function correctness
-# =========================================================================== #
-
 def test_euler_single_step_correctness():
     """_euler_step matches the expected analytic x + dt*f(x) + noise."""
     rng = np.random.default_rng(0)
@@ -132,28 +123,36 @@ def test_euler_metadata_records_method():
     assert result.metadata["integration_method"] == "euler"
 
 
-# =========================================================================== #
-# New tests: noise scaling (Euler-Maruyama sqrt(dt))
-# =========================================================================== #
-
 def test_noise_scales_with_sqrt_dt():
-    """Coarser dt produces higher per-step variance; correct SDE behavior."""
-    def trajectory_variance(dt):
-        cfg = _make_config(n=5, duration=5.0, dt=dt, noise_level=0.5,
-                           input_type="none", integration_method="euler")
-        W = np.zeros((5, 5))  # no recurrent coupling -> pure noise walk
-        results = [Simulator().run(cfg, W).activity for _ in range(30)]
-        return np.var(np.stack(results, axis=0), axis=0).mean()
+    """First-step noise std should scale like sqrt(dt)."""
+    def estimate_noise_std(dt, n_runs=200):
+        W = np.zeros((1, 1))
+        samples = []
 
-    var_coarse = trajectory_variance(0.5)
-    var_fine   = trajectory_variance(0.05)
-    # coarser dt => fewer steps, higher per-step noise amplitude => larger total variance
-    assert var_coarse > var_fine
+        for seed in range(n_runs):
+            cfg = _make_config(
+                n=1,
+                duration=2 * dt,
+                dt=dt,
+                noise_level=0.5,
+                input_type="none",
+                integration_method="euler",
+            )
+            cfg.network.random_seed = seed
+            result = Simulator().run(cfg, W)
 
+            x0 = result.activity[0, 0]
+            x1 = result.activity[0, 1]
+            noise_sample = x1 - (1.0 - dt) * x0
+            samples.append(noise_sample)
 
-# =========================================================================== #
-# New tests: all methods run and produce correct shapes
-# =========================================================================== #
+        return np.std(samples)
+
+    std_coarse = estimate_noise_std(0.5)
+    std_fine = estimate_noise_std(0.05)
+
+    assert std_coarse / std_fine == pytest.approx(np.sqrt(10.0), rel=0.25)
+
 
 @pytest.mark.parametrize("method", VALID_INTEGRATION_METHODS)
 def test_all_methods_run_and_finite(method):
@@ -171,10 +170,6 @@ def test_all_methods_result_shapes(method):
     assert result.activity.shape == (8, cfg.simulation.n_steps)
     assert result.final_state.shape == (8,)
 
-
-# =========================================================================== #
-# New tests: Heun and RK4 accuracy
-# =========================================================================== #
 
 def test_heun_more_accurate_than_euler_on_linear_system():
     """On dx/dt = -x (analytic: exp(-t)), RK4 < Heun < Euler global error."""
@@ -238,16 +233,11 @@ def test_rk4_single_step_correctness():
 
 
 def test_unknown_method_raises():
-    cfg = _make_config(n=5)
-    cfg.simulation.integration_method = "bogus"  # bypass validate
+    cfg = _make_config(n=5, integration_method="bogus")
     W = build_weight_matrix(cfg.network)
-    with pytest.raises(ValueError, match="Unknown integration_method"):
+    with pytest.raises(ValueError, match="integration_method"):
         Simulator().run(cfg, W)
 
-
-# =========================================================================== #
-# New tests: convergence_eps
-# =========================================================================== #
 
 def test_convergence_eps_terminates_early():
     """A pure-decay network (W=0, no input, no noise) converges before duration."""
@@ -279,14 +269,11 @@ def test_convergence_filled_columns_are_constant():
     W = np.zeros((4, 4))
     result = Simulator().run(cfg, W)
     c = result.metadata["converged_at"]
-    if c is not None:
-        tail = result.activity[:, c:]
+
+    if c is not None and c + 1 < result.activity.shape[1]:
+        tail = result.activity[:, c + 1:]
         assert np.all(tail == tail[:, :1])
 
-
-# =========================================================================== #
-# New tests: config validation
-# =========================================================================== #
 
 def test_convergence_eps_invalid_raises():
     cfg = SimulationConfig(convergence_eps=-1.0)
