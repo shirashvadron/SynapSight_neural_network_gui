@@ -180,26 +180,34 @@ class TestFindFixedPointsPca:
         )
         assert stability.dtype == bool
 
-    def test_fixed_points_satisfy_equilibrium(self, pca_result):
-        """Each found fixed point x* must satisfy ||f(x*)|| ≈ 0,
-        where f(x) = -x + W @ tanh(x).
-        We back-project the PCA fixed points to neuron space and verify.
-        """
-        activity = pca_result.activity
-        W = pca_result.weight_matrix
+    def test_fixed_points_satisfy_equilibrium(self):
+        """In a 2-neuron system, back-projection from 2 PCs is exact, so each
+        recovered fixed point should satisfy ||f(x*)|| ≈ 0."""
+        W = np.array([
+            [0.0, 0.25],
+            [-0.15, 0.0],
+        ])
+
+        dt = 0.1
+        T = 120
+        x = np.array([0.3, -0.2], dtype=float)
+        activity = np.zeros((2, T))
+
+        for t in range(T):
+            activity[:, t] = x
+            x = x + dt * (-x + W @ np.tanh(x))
+
         _, components, _ = _compute_pca_projection(activity)
         fp_pca, _ = _find_fixed_points_pca(W, activity, components, n_candidates=6)
 
-        if fp_pca.shape[0] == 0:
-            pytest.skip("No fixed points found for this random seed.")
+        assert fp_pca.shape[0] > 0
 
-        X_mean = activity.mean(axis=1)  # (n,)
-        # Back-project: fp_neuron = fp_pca @ components + X_mean
-        fp_neuron = fp_pca @ components + X_mean[np.newaxis, :]  # (m, n)
-        for x in fp_neuron:
-            residual = np.linalg.norm(-x + W @ np.tanh(x))
-            # Relaxed tolerance — we use gradient descent, not Newton
-            assert residual < 0.5, f"Fixed point residual too large: {residual:.4f}"
+        X_mean = activity.mean(axis=1)
+        fp_neuron = fp_pca @ components + X_mean[np.newaxis, :]
+
+        for x_star in fp_neuron:
+            residual = np.linalg.norm(-x_star + W @ np.tanh(x_star))
+            assert residual < 1e-3, f"Fixed point residual too large: {residual:.6f}"
 
     def test_empty_activity_returns_empty(self):
         """When activity has zero time steps the function should not crash."""
