@@ -71,10 +71,22 @@ class EventBasedSimulator:
             )
 
         state = np.zeros(n_neurons, dtype=float)
+
+        # activity stores the post-reset/post-decay state used for normal
+        # activity plots and final_state. For event-based simulations this can
+        # hide a spike, because a neuron that crosses threshold is immediately
+        # reset in the same step. The two arrays below preserve the event view:
+        # activation_before_reset shows the state after inputs arrive but before
+        # threshold reset, and spike_train explicitly records emitted spikes.
         activity = np.zeros((n_neurons, event_cfg.max_steps), dtype=float)
+        activation_before_reset = np.zeros(
+            (n_neurons, event_cfg.max_steps), dtype=float
+        )
+        spike_train = np.zeros((n_neurons, event_cfg.max_steps), dtype=int)
+
         spike_times: list[tuple[int, int]] = []
         event_log: list[dict[str, int | float | None | str]] = []
-
+        
         for step in range(event_cfg.max_steps):
             # Apply all events scheduled for this step.
             for event in scheduled.get(step, []):
@@ -89,9 +101,14 @@ class EventBasedSimulator:
                     "value": event.value,
                 })
 
+            # Record the pre-reset state so threshold-crossing spikes remain
+            # visible even after the spiking neurons are reset below.
+            activation_before_reset[:, step] = state
+
             # Threshold check after all input for this step has arrived.
             spiking_neurons = np.flatnonzero(state >= event_cfg.threshold)
             for source in spiking_neurons:
+                spike_train[source, step] = 1
                 spike_times.append((step, int(source)))
                 event_log.append({
                     "kind": "spike",
@@ -136,6 +153,8 @@ class EventBasedSimulator:
             "decay": event_cfg.decay,
             "spike_times": spike_times,
             "spike_counts": spike_counts.tolist(),
+            "spike_train": spike_train,
+            "activation_before_reset": activation_before_reset,
             "event_log": event_log,
             "final_state": state.copy(),
             "converged_at": None,
