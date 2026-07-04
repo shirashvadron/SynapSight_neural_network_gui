@@ -1,4 +1,8 @@
-# Neural Network Simulation & Visualization GUI
+<p align="center">
+  <img src="SynapSight.png" alt="Logo" width="400"/>
+</p>
+
+<h1 align="center">SynapSight - Neural Network Simulation & Visualization GUI</h1>
 
 A Streamlit-based visualization tool for building, importing, simulating, and exploring small recurrent neural networks.
 
