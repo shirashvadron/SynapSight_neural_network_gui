@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "editables>=0.5"]
 build-backend = "hatchling.build"
 
 [project]
@@ -11,7 +11,9 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 keywords = ["neural-network", "simulation", "visualization", "networkx", "plotly", "streamlit"]
 authors = [
-    { name = "TODO: Your Name", email = "todo@example.com" },
+    { name = "Shira Shvadron" },
+    { name = "Tom Houri" },
+    { name = "Tomer Daloomi" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -39,9 +41,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/TODO-your-org/nnsimviz"
-Repository = "https://github.com/TODO-your-org/nnsimviz"
-Issues = "https://github.com/TODO-your-org/nnsimviz/issues"
+Homepage = "https://github.com/shirashvadron/SynapSight_neural_network_gui"
+Repository = "https://github.com/shirashvadron/SynapSight_neural_network_gui"
+Issues = "https://github.com/shirashvadron/SynapSight_neural_network_gui/issues"
 
 [project.scripts]
 nnsimviz = "nnsimviz.cli:main"
