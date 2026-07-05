@@ -6,7 +6,7 @@
 
 A Streamlit-based visualization tool for building, importing, simulating, and exploring small recurrent neural networks.
 
-The project lets a user define a network, run either continuous dynamics or event-based spike-like propagation, and inspect the result through interactive graph views, activity plots, animations, PCA projections, and spike rasters.
+The project lets a user define a network, run either continuous dynamics or event-based spike-like propagation, and inspect the result through interactive graph views, activity plots, animations, 3-D PCA projections, and spike rasters.
 
 Positive connections are shown in blue, negative connections in red, and edge thickness represents connection strength.
 
@@ -40,7 +40,7 @@ Positive connections are shown in blue, negative connections in red, and edge th
   - network graph
   - activity over time
   - animated network activity
-  - animated PCA state-space trajectory
+  - animated, rotatable 3-D PCA state-space trajectory
   - spike raster for event-based simulations
 - Export:
   - config as JSON
@@ -151,7 +151,7 @@ neural_network_gui/
 | `simulation.py` | Continuous recurrent simulation engine. |
 | `event_simulation.py` | Event-based / spike-like threshold propagation engine. |
 | `pipeline.py` | Streamlit-independent orchestration: build/import network, choose simulator, return result. |
-| `visualization.py` | Plotly and NetworkX visualizations: graph, activity, animation, PCA, raster. |
+| `visualization.py` | Plotly and NetworkX visualizations: graph, activity, animation, 3-D PCA, raster. |
 | `io_utils.py` | Config JSON, CSV export, and imported weight matrix loading/validation. |
 | `help_texts.py` | Sidebar tooltip text for GUI controls. |
 | `app.py` | Streamlit user interface. |
@@ -309,7 +309,7 @@ The app currently provides:
 - interactive network graph
 - activity over time
 - animated network activity
-- PCA trajectory animation
+- rotatable 3-D PCA trajectory animation
 - event spike raster
 - event log table
 

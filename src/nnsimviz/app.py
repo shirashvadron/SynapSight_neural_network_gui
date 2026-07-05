@@ -535,10 +535,10 @@ def _show_continuous_result(result, model_name: str) -> None:
         st.subheader("Animated PCA — state-space trajectory")
         st.caption(
             "The network’s N-dimensional activity vector is projected onto its "
-            "first two principal components. The moving dot traces the collective "
-            "state through PC-space over time. "
-            "🟢 Green stars = stable fixed points · "
-            "🟠 Orange diamonds = unstable fixed points."
+            "first three principal components. The moving dot traces the collective "
+            "state through this 3-D subspace over time — click and drag to rotate. "
+            "🟢 Green diamonds = stable fixed points · "
+            "🟠 Orange open diamonds = unstable fixed points."
         )
         pca_fig = build_pca_animation_figure(result)
         st.plotly_chart(pca_fig, use_container_width=True, config=_PLOT_CONFIG)
@@ -577,7 +577,8 @@ def _show_event_result(result, model_name: str) -> None:
         st.subheader("Animated PCA — event-state trajectory")
         st.caption(
             "The event simulation activity vector is projected onto the first "
-            "two principal components over event steps."
+            "three principal components over event steps — click and drag to "
+            "rotate the 3-D view."
         )
         pca_fig = build_pca_animation_figure(result)
         st.plotly_chart(pca_fig, use_container_width=True, config=_PLOT_CONFIG)

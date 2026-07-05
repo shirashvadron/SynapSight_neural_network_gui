@@ -86,25 +86,27 @@ class TestComputePcaProjection:
     """Unit tests for the _compute_pca_projection helper."""
 
     def test_output_shapes(self, pca_result):
-        """coords must be (T, 2), components (2, n), explained (2,)."""
+        """coords must be (T, 3), components (3, n), explained (3,)."""
         activity = pca_result.activity  # (n, T)
         n, T = activity.shape
         coords, components, explained = _compute_pca_projection(activity)
-        assert coords.shape == (T, 2)
-        assert components.shape == (2, n)
-        assert explained.shape == (2,)
+        assert coords.shape == (T, 3)
+        assert components.shape == (3, n)
+        assert explained.shape == (3,)
 
     def test_explained_variance_sums_to_at_most_one(self, pca_result):
-        """The two explained-variance fractions must be in [0, 1] and sum ≤ 1."""
+        """The three explained-variance fractions must be in [0, 1] and sum ≤ 1."""
         _, _, explained = _compute_pca_projection(pca_result.activity)
         assert np.all(explained >= 0.0)
         assert np.all(explained <= 1.0)
         assert explained.sum() <= 1.0 + 1e-9  # allow tiny float error
 
     def test_explained_variance_descending(self, pca_result):
-        """PC1 must explain at least as much variance as PC2."""
+        """PC1 must explain at least as much variance as PC2, which must
+        explain at least as much as PC3."""
         _, _, explained = _compute_pca_projection(pca_result.activity)
         assert explained[0] >= explained[1] - 1e-9
+        assert explained[1] >= explained[2] - 1e-9
 
     def test_coords_are_finite(self, pca_result):
         """All projected coordinates must be finite numbers."""
@@ -112,11 +114,11 @@ class TestComputePcaProjection:
         assert np.isfinite(coords).all()
 
     def test_components_are_orthonormal(self, pca_result):
-        """The two PC directions must be orthogonal and unit-length."""
+        """The three PC directions must be orthogonal and unit-length."""
         _, components, _ = _compute_pca_projection(pca_result.activity)
-        # Gram-matrix of the two rows should be the 2x2 identity.
+        # Gram-matrix of the three rows should be the 3x3 identity.
         gram = components @ components.T
-        assert np.allclose(gram, np.eye(2), atol=1e-6)
+        assert np.allclose(gram, np.eye(3), atol=1e-6)
 
     def test_known_rank1_signal_concentrates_variance_in_pc1(self):
         """Rank-1 activity → PC1 should capture almost all variance."""
@@ -153,7 +155,7 @@ class TestComputePcaProjection:
         """Edge case: only one time step should return zeros without error."""
         activity = np.ones((5, 1))  # (n=5, T=1)
         coords, components, explained = _compute_pca_projection(activity)
-        assert coords.shape == (1, 2)
+        assert coords.shape == (1, 3)
         assert np.isfinite(coords).all()
 
 
@@ -168,7 +170,7 @@ class TestFindFixedPointsPca:
             pca_result.weight_matrix, activity, components
         )
         assert fp_pca.ndim == 2
-        assert fp_pca.shape[1] == 2
+        assert fp_pca.shape[1] == 3
         assert fp_pca.shape[0] == stability.shape[0]
 
     def test_stability_is_bool_array(self, pca_result):
@@ -181,7 +183,8 @@ class TestFindFixedPointsPca:
         assert stability.dtype == bool
 
     def test_fixed_points_satisfy_equilibrium(self):
-        """In a 2-neuron system, back-projection from 2 PCs is exact, so each
+        """In a 2-neuron system, only 2 of the 3 PCs are non-trivial (the
+        third is exactly zero), so back-projection is still exact and each
         recovered fixed point should satisfy ||f(x*)|| ≈ 0."""
         W = np.array([
             [0.0, 0.25],
@@ -216,7 +219,7 @@ class TestFindFixedPointsPca:
         activity = np.zeros((n, 1))  # single frozen state
         _, components, _ = _compute_pca_projection(activity)
         fp_pca, stability = _find_fixed_points_pca(W, activity, components, n_candidates=2)
-        assert fp_pca.shape[1] == 2
+        assert fp_pca.shape[1] == 3
         assert fp_pca.shape[0] == stability.shape[0]
 
     def test_zero_weight_matrix_has_stable_fixed_point_at_origin(self):
@@ -273,13 +276,15 @@ class TestPcaAnimatedFigure:
         trace_names = [t.name for t in fig.data if hasattr(t, "name") and t.name]
         assert any("trajectory" in n.lower() for n in trace_names)
 
-    def test_xaxis_and_yaxis_titles_contain_pc_labels(self, pca_result):
-        """X/Y axis titles must mention PC1 and PC2."""
+    def test_scene_axis_titles_contain_pc_labels(self, pca_result):
+        """Scene X/Y/Z axis titles must mention PC1, PC2, and PC3."""
         fig = build_pca_animation_figure(pca_result)
-        xaxis_title = fig.layout.xaxis.title.text or ""
-        yaxis_title = fig.layout.yaxis.title.text or ""
+        xaxis_title = fig.layout.scene.xaxis.title.text or ""
+        yaxis_title = fig.layout.scene.yaxis.title.text or ""
+        zaxis_title = fig.layout.scene.zaxis.title.text or ""
         assert "PC1" in xaxis_title
         assert "PC2" in yaxis_title
+        assert "PC3" in zaxis_title
 
     def test_figure_title_contains_pca(self, pca_result):
         """The figure title must reference PCA or state-space."""
@@ -314,9 +319,11 @@ class TestPcaAnimatedFigure:
         dot_trace = fig.data[-1]
         x_dot = dot_trace.x[0]
         y_dot = dot_trace.y[0]
+        z_dot = dot_trace.z[0]
 
         assert coords[:, 0].min() <= x_dot <= coords[:, 0].max()
         assert coords[:, 1].min() <= y_dot <= coords[:, 1].max()
+        assert coords[:, 2].min() <= z_dot <= coords[:, 2].max()
 
     def test_stable_fixed_point_trace_color_is_green(self, pca_result):
         """If a stable fixed-point trace is present it must use green."""
@@ -338,10 +345,12 @@ class TestPcaAnimatedFigure:
         """Axis labels must include the '% var' string from the explained
         variance formatting."""
         fig = build_pca_animation_figure(pca_result)
-        xaxis_title = fig.layout.xaxis.title.text or ""
-        yaxis_title = fig.layout.yaxis.title.text or ""
+        xaxis_title = fig.layout.scene.xaxis.title.text or ""
+        yaxis_title = fig.layout.scene.yaxis.title.text or ""
+        zaxis_title = fig.layout.scene.zaxis.title.text or ""
         assert "% var" in xaxis_title
         assert "% var" in yaxis_title
+        assert "% var" in zaxis_title
 
     def test_small_network_does_not_crash(self):
         """A 2-neuron network (minimum valid) must produce a figure without error."""
