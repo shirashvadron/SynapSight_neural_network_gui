@@ -11,6 +11,9 @@ The project lets a user define a network, run either continuous dynamics or even
 Positive connections are shown in blue, negative connections in red, and edge thickness represents connection strength.
 
 ---
+## Demo
+
+![Project Demo](https://github.com/shirashvadron/SynapSight_neural_network_gui/blob/main/readme.gif)
 
 ## Current features
 
