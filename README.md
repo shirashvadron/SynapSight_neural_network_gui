@@ -29,6 +29,13 @@ Positive connections are shown in blue, negative connections in red, and edge th
 - Run two simulation modes:
   - continuous recurrent dynamics
   - event-based / spike-like threshold propagation
+- Add reusable neural motifs to the base network:
+  - coincidence detector
+  - lateral inhibition
+  - negative feedback loop
+  - feedforward loop
+  - feedforward inhibition
+  - mutual excitation
 - Visualize:
   - network graph
   - activity over time
@@ -101,7 +108,7 @@ $env:PYTHONPATH="src"
 pytest
 ```
 
-The current project version has 135 passing tests.
+The current project version has 205 passing tests.
 
 ---
 
@@ -120,6 +127,8 @@ neural_network_gui/
 │       ├── help_texts.py
 │       ├── io_utils.py
 │       ├── models.py
+│       ├── motif_icons.py
+│       ├── motifs.py
 │       ├── pipeline.py
 │       ├── simulation.py
 │       └── visualization.py
@@ -137,6 +146,8 @@ neural_network_gui/
 |---|---|
 | `configs.py` | Dataclasses and validation for network, simulation, event, visualization, and project settings. |
 | `models.py` | Built-in network generators and model registry. |
+| `motifs.py` | Reusable motif definitions and motif-to-network wiring. |
+| `motif_icons.py` | Small SVG motif icons used by the GUI. |
 | `simulation.py` | Continuous recurrent simulation engine. |
 | `event_simulation.py` | Event-based / spike-like threshold propagation engine. |
 | `pipeline.py` | Streamlit-independent orchestration: build/import network, choose simulator, return result. |
@@ -250,6 +261,23 @@ Important note: this is not a full biological LIF neuron model. It is a discrete
 
 ---
 
+## Motifs
+
+The GUI can append reusable connectivity motifs as new neurons connected to the base network.
+
+Supported motif types:
+
+- coincidence detector
+- lateral inhibition
+- negative feedback loop
+- feedforward loop
+- feedforward inhibition
+- mutual excitation
+
+Motifs are controlled by the `motifs` config section. When motifs are disabled, the network is unchanged. When enabled, motifs expand the weight matrix and the visualization highlights motif nodes and internal motif edges.
+
+---
+
 ## Imported networks
 
 The GUI can import a square weight matrix from:
@@ -303,16 +331,17 @@ See:
 examples/default_config.json
 ```
 
-The config contains four sections:
+The config contains five sections:
 
 ```text
 network
 simulation
 event
 visualization
+motifs
 ```
 
-The `event` section is included even when `simulation_type` is `"continuous"`, so the same config file can easily be switched to event mode.
+The `event` section is included even when `simulation_type` is `"continuous"`, so the same config file can easily be switched to event mode. The `motifs` section is also included by default, with motifs disabled unless explicitly enabled.
 
 ---
 
@@ -320,8 +349,6 @@ The `event` section is included even when `simulation_type` is `"continuous"`, s
 
 The current project is functional, but several improvements would make it stronger:
 
-- event-based simulation should store spike trains separately from post-reset activity
-- event-based PCA should not show continuous fixed-point markers
 - GUI should expose custom external event lists
 - directed graph edges should show arrow direction
 - imported matrices should have an optional transpose checkbox

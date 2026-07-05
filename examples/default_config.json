@@ -35,5 +35,17 @@
     "min_edge_abs_weight": 0.0,
     "node_size_scale": 1.0,
     "show_activity_on_nodes": true
+  },
+  "motifs": {
+    "enabled": false,
+    "n_coincidence_detector": 0,
+    "n_lateral_inhibition": 0,
+    "n_negative_feedback_loop": 0,
+    "n_feedforward_loop": 0,
+    "n_feedforward_inhibition": 0,
+    "n_mutual_excitation": 0,
+    "connection_strength": 1.0,
+    "n_external_connections": 2,
+    "random_seed": 42
   }
 }
