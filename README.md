@@ -131,7 +131,21 @@ neural_network_gui/
 │       ├── motifs.py
 │       ├── pipeline.py
 │       ├── simulation.py
-│       └── visualization.py
+│       ├── ui/
+│       │   ├── __init__.py
+│       │   ├── constants.py
+│       │   ├── exports.py
+│       │   ├── results.py
+│       │   ├── sidebar.py
+│       │   └── style.py
+│       └── visualization/
+│           ├── __init__.py
+│           ├── common.py
+│           ├── constants.py
+│           ├── event_raster.py
+│           ├── network_graph.py
+│           ├── pca.py
+│           └── png_export.py
 ├── tests/
 ├── pyproject.toml
 ├── requirements.txt
@@ -151,10 +165,11 @@ neural_network_gui/
 | `simulation.py` | Continuous recurrent simulation engine. |
 | `event_simulation.py` | Event-based / spike-like threshold propagation engine. |
 | `pipeline.py` | Streamlit-independent orchestration: build/import network, choose simulator, return result. |
-| `visualization.py` | Plotly and NetworkX visualizations: graph, activity, animation, 3-D PCA, raster. |
+| `visualization/` | Plotly and NetworkX visualizations: graph, activity, animation, 3-D PCA, raster. Split into `network_graph.py` (`NetworkVisualizer` and its figure builders), `pca.py` (PCA/fixed-point helpers), `event_raster.py`, `png_export.py`, plus shared `constants.py`/`common.py`. |
 | `io_utils.py` | Config JSON, CSV export, and imported weight matrix loading/validation. |
 | `help_texts.py` | Sidebar tooltip text for GUI controls. |
-| `app.py` | Streamlit user interface. |
+| `app.py` | Streamlit entry point: coordinates the GUI flow (read config, run the pipeline, display results). Delegates the actual widgets/tabs to `ui/`. |
+| `ui/` | Streamlit UI helper modules used by `app.py`: `sidebar.py` (sidebar controls -> `ProjectConfig`), `results.py` (result tabs for continuous/event-based runs), `exports.py` (summary metrics and JSON/CSV/PNG export controls), `style.py` (page setup and header), plus shared `constants.py`. |
 | `cli.py` | Console command entry point for launching the Streamlit app. |
 
 ---
@@ -299,14 +314,6 @@ Imported matrices must be:
 - finite
 
 When an imported matrix is used, it overrides the generated model and updates `n_neurons` automatically.
-
-## Imported network examples
-
-SynapSight includes example weight matrices that can be uploaded into the app instead of generating a new random network.
-
-The example files are located in:
-
-examples/import_networks/
 
 ---
 
