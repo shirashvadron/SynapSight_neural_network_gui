@@ -1,10 +1,7 @@
-"""Visualization module: turns network structure + activity into Plotly figures.
+"""NetworkVisualizer: the core network-graph figure and its Plotly entry points.
 
-This module is fully independent of the GUI. It receives a SimulationResult
-(and the VisualizationConfig inside it) and nothing else, and returns Plotly
-Figures. It never imports Streamlit.
-
-The network graph follows the standard two-trace Plotly + NetworkX pattern:
+Builds interactive Plotly figures from a SimulationResult, following the
+standard two-trace Plotly + NetworkX pattern:
   * one Scatter trace for edges, drawn as disconnected line segments with
     `None` separators between coordinate pairs;
   * one Scatter trace for nodes, drawn as markers at NetworkX layout
@@ -15,191 +12,32 @@ On top of that base pattern it adds the project's core visual encoding:
   * edge width scaled by absolute weight;
   * optional node size/color by simulation activity.
 
-This module also provides:
-  * multiple layout options (spring, circular, kamada_kawai, shell, random);
-  * the model name shown as the figure title;
-  * an activity-over-time line figure;
-  * an animated version of the network graph (nodes pulse with activity);
-  * an animated, rotatable 3-D PCA projection of network state-space
-    dynamics, with fixed-point markers overlaid (build_pca_animation_figure);
-  * a static-image (PNG) export helper.
+It also provides multiple layout options, an activity-over-time line figure,
+an animated version of the network graph (nodes pulse with activity), and an
+animated, rotatable 3-D PCA projection of network state-space dynamics with
+fixed-point markers overlaid.
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import networkx as nx
 import numpy as np
 import plotly.graph_objects as go
 
-from .configs import VisualizationConfig
-from .models import MODEL_REGISTRY
-from .simulation import SimulationResult
-
-POSITIVE_COLOR = "#1f77b4"  # blue
-NEGATIVE_COLOR = "#d62728"  # red
-MOTIF_POSITIVE_COLOR = "#2ca02c"  # green (motif excitatory)
-MOTIF_NEGATIVE_COLOR = "#d62728"  # red   (motif inhibitory)
-MOTIF_RING_COLOR = "#2ca02c"      # default green ring (fallback)
-
-# Distinct ring color per motif type, so different motifs are told apart at a
-# glance. Keys are the motif_type string values used in the metadata.
-MOTIF_TYPE_COLORS: dict[str, str] = {
-    "coincidence_detector": "#2ca02c",     # green
-    "lateral_inhibition": "#9467bd",       # purple
-    "negative_feedback_loop": "#ff7f0e",   # orange
-    "feedforward_loop": "#17becf",         # cyan
-    "feedforward_inhibition": "#e377c2",   # pink
-    "mutual_excitation": "#bcbd22",        # olive
-}
-
-# Readable labels for the motif legend.
-MOTIF_TYPE_LABELS: dict[str, str] = {
-    "coincidence_detector": "Coincidence detector",
-    "lateral_inhibition": "Lateral inhibition",
-    "negative_feedback_loop": "Negative feedback loop",
-    "feedforward_loop": "Feedforward loop",
-    "feedforward_inhibition": "Feedforward inhibition",
-    "mutual_excitation": "Mutual excitation",
-}
-_N_WIDTH_BUCKETS = 5         # discrete line-width levels per sign
-_N_PCA_COMPONENTS = 3        # number of leading principal components used for PCA views
-
-# Layouts offered by the visualizer. The GUI reads this list so the two
-# never drift apart.
-AVAILABLE_LAYOUTS = ("spring", "circular", "shell", "spiral", "random")
-
-
-@dataclass
-class EdgeData:
-    """A single visible directed edge, ready for plotting."""
-
-    source: int
-    target: int
-    weight: float
-
-    @property
-    def is_positive(self) -> bool:
-        return self.weight > 0
-
-
-def _model_display_name(result: SimulationResult) -> str:
-    """Human-readable model/source name for figure titles."""
-    if result.metadata.get("network_source") == "imported":
-        return result.metadata.get("network_source_name", "Imported network")
-
-    key = result.config.network.model_type
-    model = MODEL_REGISTRY.get(key)
-    return model.name if model is not None else key
-
-
-def result_time_label(result: SimulationResult, step: int) -> str:
-    """Short label for a time step, showing the actual simulated time."""
-    return f"{result.time[step]:.2f}"
-
-
-# --------------------------------------------------------------------------- #
-# PCA helpers
-# --------------------------------------------------------------------------- #
-
-def _compute_pca_projection(activity: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Project (n_neurons, n_steps) activity matrix onto its first 3 PCs.
-
-    Returns
-    -------
-    coords   : (n_steps, 3)  PC coordinates for every time step
-    components : (3, n_neurons)  the three principal directions
-    explained  : (3,)  fraction of variance explained by each PC
-    """
-    X = activity - activity.mean(axis=1, keepdims=True)   # (n, T)
-    n, T = activity.shape
-    n_comp = _N_PCA_COMPONENTS
-
-    U, s, Vt = np.linalg.svd(X.T, full_matrices=False)    # U:(T,k), s:(k,), Vt:(k,n)
-    k = s.shape[0]
-    total_var = (s ** 2).sum() or 1.0
-
-    coords = U * s  # (T, k)
-
-    if k < n_comp:
-        coords = np.hstack([coords, np.zeros((T, n_comp - k))])
-        components = np.vstack([Vt, np.zeros((n_comp - k, n))])
-        explained = np.concatenate([(s ** 2) / total_var, np.zeros(n_comp - k)])
-    else:
-        components = Vt[:n_comp]
-        explained = (s[:n_comp] ** 2) / total_var
-
-    return coords[:, :n_comp], components[:n_comp], explained[:n_comp]
-
-
-def _find_fixed_points_pca(
-    weight_matrix: np.ndarray,
-    activity: np.ndarray,
-    components: np.ndarray,
-    n_candidates: int = 8,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Estimate fixed points and project them into PCA space.
-
-    Strategy
-    --------
-    We take several candidate states from the activity trajectory (evenly
-    spaced), then refine each one via a short fixed-point iteration:
-        x <- tanh-inverse of the effective drive  (Newton-like relaxation)
-    In practice we use a simple gradient-descent relaxation:
-        x <- x - alpha * (-x + W @ tanh(x))
-    until convergence, which is fast for well-conditioned networks.
-
-    Each converged point is then classified as stable or unstable by the
-    spectral radius of its Jacobian  J = -I + W * diag(sech²(x*)).
-    If all eigenvalues of J have Re < 0 the point is stable; otherwise unstable.
-
-    Returns
-    -------
-    fp_pca    : (m, k)  unique fixed points in PC space, k = components.shape[0]
-    stability : (m,)  bool array, True = stable
-    """
-    n, T = activity.shape
-    W = weight_matrix
-    alpha = 0.05
-    max_iter = 400
-    tol = 1e-6
-
-    # Candidate starting points: evenly sampled from trajectory.
-    cand_indices = np.linspace(0, T - 1, n_candidates, dtype=int)
-    candidates = [activity[:, i].copy() for i in cand_indices]
-
-    fps_raw: list[np.ndarray] = []
-    stabilities: list[bool] = []
-
-    for x0 in candidates:
-        x = x0.copy()
-        for _ in range(max_iter):
-            dx = -x + W @ np.tanh(x)
-            x = x + alpha * dx
-            if np.linalg.norm(dx) < tol:
-                break
-        # Deduplicate: skip if too close to an existing fixed point.
-        is_dup = any(np.linalg.norm(x - fp) < 0.1 for fp in fps_raw)
-        if not is_dup:
-            fps_raw.append(x.copy())
-            # Stability: Jacobian eigenvalues.
-            sech2 = 1.0 / (np.cosh(x) ** 2)          # (n,)
-            J = -np.eye(n) + W * sech2[np.newaxis, :]  # (n, n)
-            eigvals = np.linalg.eigvals(J)
-            stable = bool(np.all(eigvals.real < 0))
-            stabilities.append(stable)
-
-    if not fps_raw:
-        return np.empty((0, components.shape[0])), np.empty(0, dtype=bool)
-
-    # Project fixed points into PCA space using the same components.
-    X_mean = activity.mean(axis=1)                         # (n,)
-    fp_matrix = np.array(fps_raw)                          # (m, n)
-    fp_centred = fp_matrix - X_mean[np.newaxis, :]         # (m, n)
-    fp_pca = fp_centred @ components.T                     # (m, k)
-
-    return fp_pca, np.array(stabilities)
+from ..configs import VisualizationConfig
+from ..simulation import SimulationResult
+from .common import EdgeData, _model_display_name, result_time_label
+from .constants import (
+    MOTIF_NEGATIVE_COLOR,
+    MOTIF_POSITIVE_COLOR,
+    MOTIF_RING_COLOR,
+    MOTIF_TYPE_COLORS,
+    MOTIF_TYPE_LABELS,
+    NEGATIVE_COLOR,
+    POSITIVE_COLOR,
+    _N_WIDTH_BUCKETS,
+)
+from .pca import _compute_pca_projection, _find_fixed_points_pca
 
 
 class NetworkVisualizer:
@@ -855,71 +693,3 @@ def build_pca_animation_figure(result: SimulationResult) -> go.Figure:
     """
     visualizer = NetworkVisualizer(result.config.visualization)
     return visualizer.create_pca_animated_figure(result)
-
-
-def figure_to_png_bytes(fig: go.Figure, scale: float = 2.0) -> bytes:
-    """Render a Plotly figure to PNG bytes (for download).
-
-    Requires the `kaleido` package. Raises a clear RuntimeError if it is
-    missing so the GUI can show a helpful message instead of crashing.
-    """
-    try:
-        return fig.to_image(format="png", scale=scale)
-    except Exception as exc:  # kaleido missing or render failure
-        raise RuntimeError(
-            "PNG export requires the 'kaleido' package. "
-            "Install it with: pip install kaleido"
-        ) from exc
-
-
-# --------------------------------------------------------------------------- #
-# Event-based/spike-specific figures
-# --------------------------------------------------------------------------- #
-def build_event_raster_figure(result: SimulationResult) -> go.Figure:
-    """Return a spike raster figure from an event-based simulation result."""
-    spike_train = result.metadata.get("spike_train")
-    spike_times = result.metadata.get("spike_times", [])
-
-    if spike_train is not None:
-        neurons_arr, steps_arr = np.nonzero(spike_train)
-        steps = steps_arr.tolist()
-        neurons = neurons_arr.tolist()
-    else:
-        # Backward compatibility for older event results.
-        steps = [step for step, _ in spike_times]
-        neurons = [neuron for _, neuron in spike_times]
-
-    fig = go.Figure()
-
-    if steps:
-        fig.add_trace(
-            go.Scatter(
-                x=steps,
-                y=neurons,
-                mode="markers",
-                name="spike",
-                marker=dict(size=9, symbol="line-ns-open"),
-                hovertemplate="step=%{x}<br>neuron=%{y}<extra></extra>",
-            )
-        )
-    else:
-        fig.add_annotation(
-            text="No spikes emitted",
-            x=0.5,
-            y=0.5,
-            xref="paper",
-            yref="paper",
-            showarrow=False,
-        )
-
-    fig.update_layout(
-        title=dict(text="Event-based spike raster", x=0.5),
-        xaxis_title="event step",
-        yaxis_title="neuron",
-        margin=dict(b=45, l=55, r=20, t=60),
-        plot_bgcolor="white",
-        hovermode="closest",
-    )
-    fig.update_xaxes(showgrid=True, gridcolor="#eee")
-    fig.update_yaxes(showgrid=True, gridcolor="#eee")
-    return fig
