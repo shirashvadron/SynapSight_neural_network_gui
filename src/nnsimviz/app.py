@@ -196,7 +196,7 @@ def read_config_from_sidebar() -> tuple[ProjectConfig, object | None]:
         inter_module_probability=inter_module_probability,
     )
 
-    imported_weight_matrix = read_imported_weight_matrix_from_sidebar()
+    imported_weight_matrix = read_imported_weight_matrix_from_sidebar(net)
 
     if imported_weight_matrix is not None:
         network.n_neurons = int(imported_weight_matrix.shape[0])
@@ -454,11 +454,12 @@ def read_motif_config_from_sidebar() -> MotifConfig:
 # --------------------------------------------------------------------------- #
 # Streamlit upload control
 # --------------------------------------------------------------------------- #
-def read_imported_weight_matrix_from_sidebar():
-    """Read optional imported weight matrix from the sidebar."""
-    st.sidebar.subheader("Import network")
+def read_imported_weight_matrix_from_sidebar(container):
+    """Read optional imported weight matrix from the Network sidebar expander."""
+    container.divider()
+    container.subheader("Import network")
 
-    use_imported = st.sidebar.checkbox(
+    use_imported = container.checkbox(
         "Use imported weight matrix",
         value=False,
         help=(
@@ -470,7 +471,7 @@ def read_imported_weight_matrix_from_sidebar():
     if not use_imported:
         return None
 
-    uploaded_file = st.sidebar.file_uploader(
+    uploaded_file = container.file_uploader(
         "Upload W",
         type=["csv", "npy", "npz"],
         help=(
@@ -480,7 +481,7 @@ def read_imported_weight_matrix_from_sidebar():
     )
 
     if uploaded_file is None:
-        st.sidebar.info("Upload a weight matrix to use import mode.")
+        container.info("Upload a weight matrix to use import mode.")
         return None
 
     try:
@@ -489,10 +490,10 @@ def read_imported_weight_matrix_from_sidebar():
             uploaded_file.getvalue(),
         )
     except ValueError as exc:
-        st.sidebar.error(f"Could not import network: {exc}")
+        container.error(f"Could not import network: {exc}")
         st.stop()
 
-    st.sidebar.success(f"Imported W with shape {W.shape[0]} x {W.shape[1]}")
+    container.success(f"Imported W with shape {W.shape[0]} x {W.shape[1]}")
     return W
 
 
