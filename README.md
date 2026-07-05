@@ -300,6 +300,14 @@ Imported matrices must be:
 
 When an imported matrix is used, it overrides the generated model and updates `n_neurons` automatically.
 
+## Imported network examples
+
+SynapSight includes example weight matrices that can be uploaded into the app instead of generating a new random network.
+
+The example files are located in:
+
+examples/import_networks/
+
 ---
 
 ## Visualization
