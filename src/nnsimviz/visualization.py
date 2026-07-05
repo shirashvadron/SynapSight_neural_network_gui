@@ -264,12 +264,13 @@ class NetworkVisualizer:
         fig.update_layout(
             showlegend=True,
             hovermode="closest",
-            margin=dict(b=20, l=20, r=20, t=50),
-            title=dict(text=title, x=0.5, xanchor="center"),
+            margin=dict(b=70, l=20, r=20, t=50),
+            title=dict(text=title, x=0.5, xanchor="center", y=0.97, yanchor="top"),
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
             plot_bgcolor="white",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            legend=dict(orientation="h", yanchor="top", y=-0.02,
+                        xanchor="center", x=0.5),
         )
         return fig
 
@@ -399,7 +400,9 @@ class NetworkVisualizer:
                        x=0.5, xanchor="center"),
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            plot_bgcolor="white", margin=dict(b=20, l=20, r=20, t=90),
+            plot_bgcolor="white", margin=dict(b=70, l=20, r=20, t=90),
+            legend=dict(orientation="h", yanchor="top", y=-0.02,
+                        xanchor="center", x=0.5),
             updatemenus=[dict(
                 type="buttons", showactive=False, direction="left",
                 x=0.0, xanchor="left", y=1.12, yanchor="top", pad=dict(r=6, t=0),
